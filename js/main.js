@@ -351,30 +351,18 @@ function getAnnotationsForMesh(meshId) {
   );
 }
 
-// ----- 计算标注的 3D 中心（世界坐标） -----
+// ----- 计算标注的 3D 中心（世界坐标），以最先选择的目标为准 -----
 function getAnnotationWorldCenter(annot) {
-  const center = new THREE.Vector3();
-  let count = 0;
-  annot.targets.forEach((t) => {
-    const entry = state.meshes.find(m => m.meshId === t.meshId);
-    if (!entry) return;
-    const { mesh } = entry;
-    if (!t.faceIndices || t.faceIndices.length === 0) {
-      const box = new THREE.Box3().setFromObject(mesh);
-      const c = box.getCenter(new THREE.Vector3());
-      center.add(c);
-      count++;
-    } else {
-      t.faceIndices.forEach(fi => {
-        const fc = getFaceWorldCenter(mesh, fi);
-        center.add(fc);
-        count++;
-      });
-    }
-  });
-  if (count === 0) return null;
-  center.divideScalar(count);
-  return center;
+  const t = annot.targets?.[0];
+  if (!t) return null;
+  const entry = state.meshes.find(m => m.meshId === t.meshId);
+  if (!entry) return null;
+  const { mesh } = entry;
+  if (!t.faceIndices || t.faceIndices.length === 0) {
+    const box = new THREE.Box3().setFromObject(mesh);
+    return box.getCenter(new THREE.Vector3());
+  }
+  return getFaceWorldCenter(mesh, t.faceIndices[0]);
 }
 
 // ----- 绘制专利图式标注：白线 + 白色文字 -----
