@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>3D 标注 Demo - Semantic Annotation</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div id="app">
+    <!-- 3D Canvas -->
+    <div id="canvas-container">
+      <canvas id="canvas"></canvas>
+      <canvas id="callout-canvas"></canvas>
+      <div id="selection-rect" class="hidden"></div>
+      <div id="loader">加载中...</div>
+      <div id="hint">左键选择 · 右键拖拽旋转 · 中键滚轮缩放 · Alt+左键拖拽框选</div>
+    </div>
+
+    <!-- 右侧面板 -->
+    <aside id="panel">
+      <section class="panel-section">
+        <h2>加载模型</h2>
+        <input type="file" id="model-input" accept=".glb,.gltf" />
+        <button id="btn-default-model">加载示例建筑</button>
+      </section>
+
+      <section class="panel-section">
+        <h2>选择模式</h2>
+        <div class="mode-toggle">
+          <button id="btn-mode-object" class="mode-btn active">物体</button>
+          <button id="btn-mode-face" class="mode-btn">面</button>
+        </div>
+      </section>
+
+      <section class="panel-section">
+        <h2>当前选择</h2>
+        <div id="selection-info">未选择</div>
+        <div id="annotation-form" class="hidden">
+          <input type="text" id="annot-label" placeholder="标签 (如: 商铺)" />
+          <input type="text" id="annot-category" placeholder="分类 (如: Commercial)" />
+          <input type="color" id="annot-color" value="#FF9900" title="颜色" />
+          <button id="btn-add-annotation">新建标注</button>
+          <div id="add-to-annot-row" class="hidden">
+            <select id="annot-target-select"></select>
+            <button id="btn-add-to-annot">添加到已有标注</button>
+          </div>
+        </div>
+      </section>
+
+      <section class="panel-section">
+        <h2>标注层</h2>
+        <div class="opacity-control">
+          <label for="annot-opacity">着色透明度</label>
+          <input type="range" id="annot-opacity" min="0.1" max="1" step="0.05" value="0.45" />
+          <span id="opacity-value">45%</span>
+        </div>
+        <ul id="annotation-list"></ul>
+      </section>
+    </aside>
+  </div>
+
+  <script type="importmap">
+  {
+    "imports": {
+      "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+      "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+    }
+  }
+  </script>
+  <script type="module" src="js/main.js"></script>
+</body>
+</html>

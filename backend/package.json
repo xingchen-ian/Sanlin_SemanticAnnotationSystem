@@ -1,0 +1,16 @@
+{
+  "name": "sanlin-annotation-api",
+  "version": "1.0.0",
+  "type": "module",
+  "main": "src/index.js",
+  "scripts": {
+    "start": "node src/index.js",
+    "dev": "node --watch src/index.js"
+  },
+  "dependencies": {
+    "cors": "^2.8.5",
+    "express": "^4.18.2",
+    "pusher": "^5.2.0",
+    "@supabase/supabase-js": "^2.39.0"
+  }
+}
