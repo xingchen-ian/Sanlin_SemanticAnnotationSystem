@@ -823,9 +823,8 @@ function updateAuthUI() {
 }
 
 async function initAuth() {
-  const authSection = document.getElementById('auth-section');
   if (!supabase) {
-    if (authSection) authSection.classList.add('hidden');
+    updateAuthUI(); // 仍显示登录区域，点击时提示「Supabase 未配置」
     return;
   }
   try {
