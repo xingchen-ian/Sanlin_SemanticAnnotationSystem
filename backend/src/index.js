@@ -79,6 +79,32 @@ app.post('/api/models', async (req, res) => {
   res.json(data);
 });
 
+app.patch('/api/models/:id', requireAuth, async (req, res) => {
+  if (!supabase) return res.status(503).json({ error: 'Supabase not configured' });
+  const { id } = req.params;
+  const { name } = req.body;
+  if (!name || typeof name !== 'string' || !name.trim()) {
+    return res.status(400).json({ error: 'name is required' });
+  }
+  const { data, error } = await supabase.from('models').update({ name: name.trim() }).eq('id', id).select().single();
+  if (error) return res.status(500).json({ error: error.message });
+  if (!data) return res.status(404).json({ error: 'Not found' });
+  res.json(data);
+});
+
+app.delete('/api/models/:id', requireAuth, async (req, res) => {
+  if (!supabase) return res.status(503).json({ error: 'Supabase not configured' });
+  const { id } = req.params;
+  const { data: model } = await supabase.from('models').select('url').eq('id', id).single();
+  if (!model) return res.status(404).json({ error: 'Not found' });
+  if (model.url === 'builtin://default') {
+    return res.status(400).json({ error: 'Cannot delete default model' });
+  }
+  const { error } = await supabase.from('models').delete().eq('id', id);
+  if (error) return res.status(500).json({ error: error.message });
+  res.json({ deleted: true, id });
+});
+
 // 上传模型文件到 Supabase Storage，并创建模型记录
 app.post('/api/models/upload', requireAuth, upload.single('file'), async (req, res) => {
   if (!supabase) return res.status(503).json({ error: 'Supabase not configured' });

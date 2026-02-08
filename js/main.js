@@ -1043,13 +1043,21 @@ function renderModelList(models) {
   const builtin = models.filter((m) => m.url === 'builtin://default');
   const others = models.filter((m) => m.url !== 'builtin://default');
   const esc = (s) => String(s || '').replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;');
-  ul.innerHTML = [...builtin, ...others].map(
-    (m) =>
-      `<li class="model-list-item" data-id="${esc(m.id)}">
-        <span class="model-list-name">${esc(m.name || '未命名')}</span>
-        <button type="button" class="btn-load-model" data-id="${esc(m.id)}" data-url="${esc(m.url || '')}" title="加载">加载</button>
-      </li>`
-  ).join('');
+  ul.innerHTML = [...builtin, ...others].map((m) => {
+    const name = m.name || m.Name || '未命名';
+    const isBuiltin = m.url === 'builtin://default';
+    return `<li class="model-list-item" data-id="${esc(m.id)}">
+      <div class="model-list-main">
+        <span class="model-list-name" title="${esc(name)}">${esc(name)}</span>
+        <div class="model-list-actions">
+          <button type="button" class="btn-load-model" data-id="${esc(m.id)}" data-url="${esc(m.url || '')}" title="加载">加载</button>
+          <button type="button" class="btn-rename-model" data-id="${esc(m.id)}" title="重命名">重命名</button>
+          <button type="button" class="btn-delete-model" data-id="${esc(m.id)}" data-builtin="${isBuiltin}" title="删除">删除</button>
+        </div>
+      </div>
+    </li>`;
+  }).join('');
+
   ul.querySelectorAll('.btn-load-model').forEach((btn) => {
     btn.addEventListener('click', () => {
       const id = btn.dataset.id;
@@ -1058,6 +1066,87 @@ function renderModelList(models) {
       if (id && url) loadModelFromList({ id, url, name });
     });
   });
+  ul.querySelectorAll('.btn-rename-model').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const id = btn.dataset.id;
+      const item = btn.closest('.model-list-item');
+      const nameEl = item?.querySelector('.model-list-name');
+      const currentName = nameEl?.textContent || '';
+      const newName = prompt('输入新名称', currentName);
+      if (newName !== null && newName.trim()) renameModel(id, newName.trim(), item);
+    });
+  });
+  ul.querySelectorAll('.btn-delete-model').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const id = btn.dataset.id;
+      const isBuiltin = btn.dataset.builtin === 'true';
+      if (isBuiltin) {
+        alert('示例建筑不可删除');
+        return;
+      }
+      if (confirm('确定删除此模型？其标注也会被删除。')) deleteModel(id);
+    });
+  });
+}
+
+async function renameModel(id, name, itemEl) {
+  const base = getApiUrl();
+  if (!base || !state.session?.access_token) {
+    setPersistStatus('请先登录', true);
+    return;
+  }
+  try {
+    const r = await fetch(`${base}/api/models/${id}`, {
+      method: 'PATCH',
+      headers: getAuthHeaders(),
+      body: JSON.stringify({ name }),
+    });
+    if (r.status === 401) { setPersistStatus('请先登录', true); return; }
+    if (!r.ok) {
+      const err = await r.json().catch(() => ({}));
+      throw new Error(err.error || '重命名失败');
+    }
+    const span = itemEl?.querySelector('.model-list-name');
+    if (span) span.textContent = name;
+    setPersistStatus('已重命名');
+  } catch (e) {
+    setPersistStatus(e.message || '重命名失败', true);
+  }
+}
+
+async function deleteModel(id) {
+  const base = getApiUrl();
+  if (!base || !state.session?.access_token) {
+    setPersistStatus('请先登录', true);
+    return;
+  }
+  try {
+    const r = await fetch(`${base}/api/models/${id}`, {
+      method: 'DELETE',
+      headers: getAuthHeaders(),
+    });
+    if (r.status === 401) { setPersistStatus('请先登录', true); return; }
+    if (!r.ok) {
+      const err = await r.json().catch(() => ({}));
+      throw new Error(err.error || '删除失败');
+    }
+    if (state.currentModelId === id) {
+      clearModel(state.scene);
+      unsubscribePusher();
+      state.currentModelId = null;
+      createDefaultBuilding(state.scene);
+      state.currentModelId = await ensureDefaultModel();
+      if (state.currentModelId) await loadAnnotationsFromApi();
+      subscribePusher(state.currentModelId);
+      updateAnnotationList();
+      updateSelectionUI();
+    }
+    const list = await fetchModelList();
+    renderModelList(list);
+    setPersistStatus('已删除');
+  } catch (e) {
+    setPersistStatus(e.message || '删除失败', true);
+  }
 }
 
 async function loadModelFromList(model) {

@@ -186,26 +186,58 @@ body {
 }
 
 .model-list-item {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 6px 0;
+  padding: 8px 0;
   font-size: 13px;
+  border-bottom: 1px solid #333;
+}
+
+.model-list-item:last-child {
+  border-bottom: none;
+}
+
+.model-list-main {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
 }
 
 .model-list-name {
-  flex: 1;
-  min-width: 0;
+  font-weight: 500;
+  color: #e0e0e0;
   overflow: hidden;
   text-overflow: ellipsis;
-  color: #ccc;
+  white-space: nowrap;
+}
+
+.model-list-actions {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.model-list-actions button {
+  flex: 1;
+  min-width: 0;
+  padding: 4px 8px;
+  font-size: 11px;
+  margin-top: 0;
 }
 
 .btn-load-model {
-  flex-shrink: 0;
-  padding: 4px 10px;
-  font-size: 12px;
-  margin-top: 0;
+  background: #0d7377;
+}
+
+.btn-load-model:hover {
+  background: #0e8589;
+}
+
+.btn-rename-model,
+.btn-delete-model {
+  background: #333;
+}
+
+.btn-delete-model:hover {
+  background: #5a2222;
 }
 
 .mode-toggle {
