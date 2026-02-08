@@ -26,6 +26,7 @@ const state = {
   faceOverlayMeshes: new Map(),  // meshId -> THREE.Mesh (face highlight overlay)
   overlayOpacity: 0.45,
   currentModelId: null,  // 当前模型的 Supabase ID，用于保存/加载
+  editingIndex: null,    // 正在编辑的标注索引
 };
 
 // ----- 创建默认示例建筑 -----
@@ -550,29 +551,132 @@ function targetsSummary(targets) {
   return parts.join(' ') || '-';
 }
 
+function isServerId(id) {
+  return id && typeof id === 'string' && !id.startsWith('annot_');
+}
+
 function updateAnnotationList() {
   const ul = document.getElementById('annotation-list');
-  ul.innerHTML = state.annotations.map((a, i) => `
-    <li data-index="${i}" title="点击聚焦">
-      <span style="color:${a.color}">■</span> ${a.label || '未命名'}
-      <div class="annot-meta">${a.category || '-'} · ${targetsSummary(a.targets)}</div>
-    </li>
-  `).join('');
+  const editingIndex = state.editingIndex;
+  ul.innerHTML = state.annotations.map((a, i) => {
+    if (editingIndex === i) {
+      return `
+        <li class="annot-item editing" data-index="${i}">
+          <div class="annot-edit-form">
+            <input type="text" class="annot-edit-label" value="${(a.label || '').replace(/"/g, '&quot;')}" placeholder="标签" />
+            <input type="text" class="annot-edit-category" value="${(a.category || '').replace(/"/g, '&quot;')}" placeholder="分类" />
+            <input type="color" class="annot-edit-color" value="${a.color || '#FF9900'}" />
+            <div class="annot-edit-actions">
+              <button type="button" class="btn-save-edit">保存</button>
+              <button type="button" class="btn-cancel-edit">取消</button>
+            </div>
+          </div>
+        </li>
+      `;
+    }
+    return `
+      <li class="annot-item" data-index="${i}" title="点击聚焦">
+        <div class="annot-item-main">
+          <span style="color:${a.color}">■</span>
+          <span class="annot-item-label">${a.label || '未命名'}</span>
+          <div class="annot-item-actions">
+            <button type="button" class="btn-edit-annot" title="编辑">编辑</button>
+            <button type="button" class="btn-delete-annot" title="删除">删除</button>
+          </div>
+        </div>
+        <div class="annot-meta">${a.category || '-'} · ${targetsSummary(a.targets)}</div>
+      </li>
+    `;
+  }).join('');
 
   ul.querySelectorAll('li').forEach(li => {
-    li.addEventListener('click', () => {
-      const idx = parseInt(li.dataset.index, 10);
-      const annot = state.annotations[idx];
-      if (annot) {
-        state.selectedTargets.clear();
-        annot.targets.forEach(t => {
-          state.selectedTargets.set(t.meshId, t.faceIndices?.length ? [...t.faceIndices] : null);
-        });
-        updateHighlight();
-        updateSelectionUI();
-      }
+    const idx = parseInt(li.dataset.index, 10);
+    const annot = state.annotations[idx];
+    if (!annot) return;
+
+    if (state.editingIndex === idx) {
+      const saveBtn = li.querySelector('.btn-save-edit');
+      const cancelBtn = li.querySelector('.btn-cancel-edit');
+      saveBtn?.addEventListener('click', () => {
+        const label = li.querySelector('.annot-edit-label').value.trim() || '未命名';
+        const category = li.querySelector('.annot-edit-category').value.trim() || '';
+        const color = li.querySelector('.annot-edit-color').value;
+        saveEditAnnotation(idx, { label, category, color });
+      });
+      cancelBtn?.addEventListener('click', () => {
+        state.editingIndex = null;
+        updateAnnotationList();
+      });
+      return;
+    }
+
+    li.querySelector('.annot-item-main')?.addEventListener('click', (e) => {
+      if (e.target.closest('.annot-item-actions')) return;
+      state.selectedTargets.clear();
+      annot.targets.forEach(t => {
+        state.selectedTargets.set(t.meshId, t.faceIndices?.length ? [...t.faceIndices] : null);
+      });
+      updateHighlight();
+      updateSelectionUI();
+    });
+
+    li.querySelector('.btn-edit-annot')?.addEventListener('click', (e) => {
+      e.stopPropagation();
+      state.editingIndex = idx;
+      updateAnnotationList();
+    });
+
+    li.querySelector('.btn-delete-annot')?.addEventListener('click', (e) => {
+      e.stopPropagation();
+      deleteAnnotation(idx);
     });
   });
+}
+
+async function saveEditAnnotation(idx, { label, category, color }) {
+  const a = state.annotations[idx];
+  if (!a) return;
+  a.label = label;
+  a.category = category;
+  a.color = color;
+  state.editingIndex = null;
+
+  const base = getApiUrl();
+  const modelId = state.currentModelId;
+  if (base && modelId && isServerId(a.id)) {
+    try {
+      await fetch(`${base}/api/models/${modelId}/annotations/${a.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ label, category, color }),
+      });
+    } catch (e) {
+      console.error('saveEditAnnotation:', e);
+    }
+  }
+  updateAnnotationList();
+  updateHighlight();
+}
+
+async function deleteAnnotation(idx) {
+  if (!confirm('确定删除此标注？')) return;
+  const a = state.annotations[idx];
+  if (!a) return;
+
+  const base = getApiUrl();
+  const modelId = state.currentModelId;
+  if (base && modelId && isServerId(a.id)) {
+    try {
+      await fetch(`${base}/api/models/${modelId}/annotations/${a.id}`, { method: 'DELETE' });
+    } catch (e) {
+      console.error('deleteAnnotation:', e);
+    }
+  }
+  state.annotations.splice(idx, 1);
+  if (state.editingIndex === idx) state.editingIndex = null;
+  else if (state.editingIndex !== null && state.editingIndex > idx) state.editingIndex--;
+  updateAnnotationList();
+  updateHighlight();
 }
 
 // ----- 添加标注 -----
@@ -728,7 +832,18 @@ async function saveAnnotationsToApi() {
     });
     if (!r.ok) throw new Error(await r.text());
     const data = await r.json();
-    setPersistStatus(`已保存 ${(data || []).length} 条标注`);
+    state.annotations = (data || []).map((a) => ({
+      id: a.id,
+      targets: a.targets || [],
+      label: a.label || '未命名',
+      category: a.category || '',
+      color: a.color || '#FF9900',
+      createdAt: a.created_at ? new Date(a.created_at).getTime() : Date.now(),
+    }));
+    state.editingIndex = null;
+    updateAnnotationList();
+    updateHighlight();
+    setPersistStatus(`已保存 ${state.annotations.length} 条标注`);
   } catch (e) {
     console.error('saveAnnotations:', e);
     setPersistStatus('保存失败', true);

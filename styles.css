@@ -271,7 +271,73 @@ button:hover {
   border-radius: 6px;
   border-left: 3px solid #0d7377;
   font-size: 13px;
+}
+
+#annotation-list li .annot-item-main {
   cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+#annotation-list li .annot-item-main:hover {
+  color: #fff;
+}
+
+#annotation-list li .annot-item-label {
+  flex: 1;
+  min-width: 0;
+}
+
+#annotation-list li .annot-item-actions {
+  display: flex;
+  gap: 4px;
+}
+
+#annotation-list li .btn-edit-annot,
+#annotation-list li .btn-delete-annot {
+  padding: 4px 8px;
+  font-size: 11px;
+  margin: 0;
+  flex: none;
+}
+
+#annotation-list li .btn-delete-annot {
+  background: #5a2a2a;
+}
+
+#annotation-list li .btn-delete-annot:hover {
+  background: #6a3a3a;
+}
+
+#annotation-list li.editing {
+  border-left-color: #888;
+}
+
+.annot-edit-form input[type="text"] {
+  width: 100%;
+  margin-bottom: 6px;
+  padding: 6px 8px;
+  font-size: 12px;
+}
+
+.annot-edit-form input[type="color"] {
+  width: 100%;
+  height: 28px;
+  margin-bottom: 8px;
+}
+
+.annot-edit-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.annot-edit-actions button {
+  flex: 1;
+  margin: 0;
+  padding: 6px;
+  font-size: 12px;
 }
 
 #annotation-list li:hover {

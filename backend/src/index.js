@@ -94,6 +94,44 @@ app.put('/api/models/:modelId/annotations', async (req, res) => {
   res.json(data || []);
 });
 
+app.patch('/api/models/:modelId/annotations/:id', async (req, res) => {
+  if (!supabase) return res.status(503).json({ error: 'Supabase not configured' });
+  const { modelId, id } = req.params;
+  const { label, category, color, targets } = req.body;
+  const updates = {};
+  if (label !== undefined) updates.label = label;
+  if (category !== undefined) updates.category = category;
+  if (color !== undefined) updates.color = color;
+  if (targets !== undefined) updates.targets = targets;
+  if (Object.keys(updates).length === 0) return res.status(400).json({ error: 'No fields to update' });
+  const { data, error } = await supabase
+    .from('annotations')
+    .update(updates)
+    .eq('id', id)
+    .eq('model_id', modelId)
+    .select()
+    .single();
+  if (error) return res.status(500).json({ error: error.message });
+  if (!data) return res.status(404).json({ error: 'Not found' });
+  if (pusher) pusher.trigger(`model-${modelId}`, 'annotation-updated', data).catch(console.error);
+  res.json(data);
+});
+
+app.delete('/api/models/:modelId/annotations/:id', async (req, res) => {
+  if (!supabase) return res.status(503).json({ error: 'Supabase not configured' });
+  const { modelId, id } = req.params;
+  const { data, error } = await supabase
+    .from('annotations')
+    .delete()
+    .eq('id', id)
+    .eq('model_id', modelId)
+    .select()
+    .single();
+  if (error) return res.status(500).json({ error: error.message });
+  if (pusher) pusher.trigger(`model-${modelId}`, 'annotation-deleted', { id }).catch(console.error);
+  res.json({ deleted: true, id });
+});
+
 app.post('/api/models/:modelId/annotations', async (req, res) => {
   if (!supabase) return res.status(503).json({ error: 'Supabase not configured' });
   const { modelId } = req.params;
