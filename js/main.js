@@ -408,6 +408,9 @@ function updateCalloutOverlay() {
   const LINE_LENGTH = 150;
   const S_CURVE_AMPLITUDE = 18;
   const FONT = '14px sans-serif';
+  const ANGLE = Math.PI / 4; // 斜上 45 度
+  const cos45 = Math.cos(ANGLE);
+  const sin45 = Math.sin(ANGLE);
 
   state.annotations.forEach((annot) => {
     if (state.hiddenAnnotationIds.has(annot.id)) return;
@@ -423,14 +426,15 @@ function updateCalloutOverlay() {
     ctx.font = FONT;
 
     const dx = px < canvas.width / 2 ? 1 : -1;
-    const tx = px + dx * LINE_LENGTH;
-    const ty = py;
+    const tx = px + dx * LINE_LENGTH * cos45;
+    const ty = py - LINE_LENGTH * sin45;
 
-    const dist = tx - px;
-    const cp1x = px + 0.35 * dist;
-    const cp1y = py - S_CURVE_AMPLITUDE;
-    const cp2x = px + 0.65 * dist;
-    const cp2y = py + S_CURVE_AMPLITUDE;
+    const vx = tx - px;
+    const vy = ty - py;
+    const cp1x = px + 0.35 * vx;
+    const cp1y = py + 0.35 * vy - S_CURVE_AMPLITUDE * cos45;
+    const cp2x = px + 0.65 * vx;
+    const cp2y = py + 0.65 * vy + S_CURVE_AMPLITUDE * cos45;
 
     ctx.strokeStyle = '#ffffff';
     ctx.lineWidth = 1.5;
