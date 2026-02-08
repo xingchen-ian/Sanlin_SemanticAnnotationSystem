@@ -18,9 +18,10 @@
 ## 1. Supabase
 
 1. 访问 [supabase.com](https://supabase.com) 创建项目
-2. 在 SQL Editor 中执行 `supabase/migrations/001_initial.sql`
+2. 在 SQL Editor 中执行 `supabase/migrations/001_initial.sql` 和 `002_storage_models_bucket.sql`
 3. 在 Settings → API 中复制 `Project URL`、`anon/public` key、`service_role` key
 4. 在 Authentication → Providers 中启用 **Email**（邮箱+密码登录）
+5. 若 002 迁移未创建 `models` 桶，可在 Storage → New bucket 中手动创建：名称 `models`，勾选 Public
 
 ## 2. Pusher
 

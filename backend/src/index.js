@@ -1,14 +1,18 @@
 /**
  * Sanlin 3D Annotation API - Railway
- * 与 Supabase (DB) + Pusher (实时) 配合
+ * 与 Supabase (DB + Storage) + Pusher (实时) 配合
  */
 import express from 'express';
 import cors from 'cors';
+import multer from 'multer';
 import { createClient } from '@supabase/supabase-js';
 import Pusher from 'pusher';
+import crypto from 'crypto';
 
 const app = express();
 const PORT = process.env.PORT || 3001;
+
+const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 50 * 1024 * 1024 } }); // 50MB
 
 const frontendOrigin = process.env.FRONTEND_URL
   ? process.env.FRONTEND_URL.replace(/\/$/, '')
@@ -73,6 +77,48 @@ app.post('/api/models', async (req, res) => {
   const { data, error } = await supabase.from('models').insert({ name, url }).select().single();
   if (error) return res.status(500).json({ error: error.message });
   res.json(data);
+});
+
+// 上传模型文件到 Supabase Storage，并创建模型记录
+app.post('/api/models/upload', requireAuth, upload.single('file'), async (req, res) => {
+  if (!supabase) return res.status(503).json({ error: 'Supabase not configured' });
+  const file = req.file;
+  if (!file) return res.status(400).json({ error: 'No file uploaded' });
+  const ext = file.originalname.split('.').pop() || 'glb';
+  if (!['glb', 'gltf'].includes(ext.toLowerCase())) {
+    return res.status(400).json({ error: 'Only .glb or .gltf files allowed' });
+  }
+  const name = req.body.name || file.originalname || '未命名模型';
+  const path = `${crypto.randomUUID()}.${ext}`;
+  try {
+    const { data: buckets } = await supabase.storage.listBuckets();
+    const hasModels = buckets?.some((b) => b.name === 'models');
+    if (!hasModels) {
+      const { error: createErr } = await supabase.storage.createBucket('models', {
+        public: true,
+        fileSizeLimit: 52428800,
+        allowedMimeTypes: ['model/gltf-binary', 'model/gltf+json', 'application/octet-stream'],
+      });
+      if (createErr) {
+        return res.status(503).json({ error: 'Storage bucket "models" not found. Create it in Supabase Dashboard (Storage -> New bucket).' });
+      }
+    }
+    const { error: uploadErr } = await supabase.storage
+      .from('models')
+      .upload(path, file.buffer, { contentType: file.mimetype || 'model/gltf-binary', upsert: false });
+    if (uploadErr) {
+      if (uploadErr.message?.includes('Bucket not found')) {
+        return res.status(503).json({ error: 'Storage bucket "models" not found. Create it in Supabase Dashboard.' });
+      }
+      return res.status(500).json({ error: uploadErr.message });
+    }
+    const { data: { publicUrl } } = supabase.storage.from('models').getPublicUrl(path);
+    const { data: model, error: dbErr } = await supabase.from('models').insert({ name, url: publicUrl }).select().single();
+    if (dbErr) return res.status(500).json({ error: dbErr.message });
+    res.json(model);
+  } catch (e) {
+    res.status(500).json({ error: e.message || 'Upload failed' });
+  }
 });
 
 // Annotations API (需登录)

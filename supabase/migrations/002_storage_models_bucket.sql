@@ -1,0 +1,3 @@
+-- 模型文件存储桶
+-- 请在 Supabase Dashboard 中：Storage -> New bucket -> 名称 "models"，勾选 Public
+-- 或在首次上传时由后端自动创建（需后端实现）

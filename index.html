@@ -38,7 +38,12 @@
       <section class="panel-section">
         <h2>加载模型</h2>
         <input type="file" id="model-input" accept=".glb,.gltf" />
+        <input type="text" id="model-name-input" placeholder="模型名称（可选）" class="model-name-input" />
         <button id="btn-default-model">加载示例建筑</button>
+        <div id="model-list-section">
+          <h3 class="model-list-title">我的模型</h3>
+          <ul id="model-list"></ul>
+        </div>
       </section>
 
       <section class="panel-section">

@@ -160,6 +160,54 @@ body {
   color: #e57373;
 }
 
+.model-name-input {
+  width: 100%;
+  margin-top: 6px;
+  margin-bottom: 8px;
+}
+
+#model-list-section {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid #333;
+}
+
+.model-list-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: #888;
+  margin-bottom: 8px;
+}
+
+#model-list {
+  list-style: none;
+  max-height: 180px;
+  overflow-y: auto;
+}
+
+.model-list-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 0;
+  font-size: 13px;
+}
+
+.model-list-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: #ccc;
+}
+
+.btn-load-model {
+  flex-shrink: 0;
+  padding: 4px 10px;
+  font-size: 12px;
+  margin-top: 0;
+}
+
 .mode-toggle {
   display: flex;
   gap: 8px;

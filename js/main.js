@@ -804,6 +804,14 @@ function getAuthHeaders() {
   return h;
 }
 
+function getAuthHeadersForUpload() {
+  const h = {};
+  if (state.session?.access_token) {
+    h['Authorization'] = `Bearer ${state.session.access_token}`;
+  }
+  return h;
+}
+
 function setPersistStatus(msg, isError = false) {
   const el = document.getElementById('persist-status');
   if (!el) return;
@@ -973,6 +981,111 @@ function unsubscribePusher() {
   if (pusherChannel && pusherClient) {
     pusherClient.unsubscribe(pusherChannel.name);
     pusherChannel = null;
+  }
+}
+
+async function uploadModelToApi(file, name) {
+  const base = getApiUrl();
+  if (!base) {
+    setPersistStatus('请先配置 API 地址', true);
+    return null;
+  }
+  if (!state.session?.access_token) {
+    setPersistStatus('请先登录', true);
+    return null;
+  }
+  const form = new FormData();
+  form.append('file', file);
+  if (name && name.trim()) form.append('name', name.trim());
+  try {
+    const r = await fetch(`${base}/api/models/upload`, {
+      method: 'POST',
+      headers: getAuthHeadersForUpload(),
+      body: form,
+    });
+    if (r.status === 401) {
+      setPersistStatus('请先登录', true);
+      return null;
+    }
+    if (!r.ok) {
+      let msg = '上传失败';
+      try {
+        const err = await r.json();
+        msg = err.error || msg;
+      } catch {
+        msg = await r.text() || msg;
+      }
+      throw new Error(msg);
+    }
+    return await r.json();
+  } catch (e) {
+    setPersistStatus(e.message || '上传失败', true);
+    return null;
+  }
+}
+
+async function fetchModelList() {
+  const base = getApiUrl();
+  if (!base) return [];
+  try {
+    const r = await fetch(`${base}/api/models`);
+    const data = await r.json();
+    return Array.isArray(data) ? data : [];
+  } catch (e) {
+    console.error('fetchModelList:', e);
+    return [];
+  }
+}
+
+function renderModelList(models) {
+  const ul = document.getElementById('model-list');
+  if (!ul) return;
+  const builtin = models.filter((m) => m.url === 'builtin://default');
+  const others = models.filter((m) => m.url !== 'builtin://default');
+  const esc = (s) => String(s || '').replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;');
+  ul.innerHTML = [...builtin, ...others].map(
+    (m) =>
+      `<li class="model-list-item" data-id="${esc(m.id)}">
+        <span class="model-list-name">${esc(m.name || '未命名')}</span>
+        <button type="button" class="btn-load-model" data-id="${esc(m.id)}" data-url="${esc(m.url || '')}" title="加载">加载</button>
+      </li>`
+  ).join('');
+  ul.querySelectorAll('.btn-load-model').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const id = btn.dataset.id;
+      const url = btn.dataset.url;
+      const name = btn.closest('.model-list-item')?.querySelector('.model-list-name')?.textContent || '未命名';
+      if (id && url) loadModelFromList({ id, url, name });
+    });
+  });
+}
+
+async function loadModelFromList(model) {
+  if (!model?.id || !model?.url) return;
+  const loaderEl = document.getElementById('loader');
+  clearModel(state.scene);
+  unsubscribePusher();
+  state.currentModelId = model.id;
+  loaderEl?.classList.remove('hidden');
+  try {
+    if (model.url === 'builtin://default') {
+      createDefaultBuilding(state.scene);
+    } else {
+      await loadModel(model.url);
+    }
+    if (state.session?.access_token) await loadAnnotationsFromApi();
+    subscribePusher(state.currentModelId);
+    updateAnnotationList();
+    updateSelectionUI();
+  } catch (e) {
+    console.error('loadModelFromList:', e);
+    alert('加载模型失败: ' + (e.message || e));
+    createDefaultBuilding(state.scene);
+    state.currentModelId = await ensureDefaultModel();
+    if (state.currentModelId) await loadAnnotationsFromApi();
+    subscribePusher(state.currentModelId);
+  } finally {
+    loaderEl?.classList.add('hidden');
   }
 }
 
@@ -1175,6 +1288,8 @@ async function init() {
   state.currentModelId = await ensureDefaultModel();
   if (state.currentModelId && state.session?.access_token) await loadAnnotationsFromApi();
   subscribePusher(state.currentModelId);
+  const modelList = await fetchModelList();
+  renderModelList(modelList);
 
   canvas.addEventListener('mousedown', onPointerDown);
   canvas.addEventListener('click', onPointerClick);
@@ -1184,21 +1299,32 @@ async function init() {
   document.getElementById('model-input').addEventListener('change', async (e) => {
     const file = e.target.files?.[0];
     if (!file) return;
-    clearModel(state.scene);
-    unsubscribePusher();
-    state.currentModelId = null;
+    const nameInput = document.getElementById('model-name-input');
+    const name = nameInput?.value?.trim() || file.name.replace(/\.(glb|gltf)$/i, '');
     loaderEl.classList.remove('hidden');
+    loaderEl.textContent = '上传中...';
     try {
-      await loadModel(file);
+      const model = await uploadModelToApi(file, name);
+      e.target.value = '';
+      if (model?.id && model?.url) {
+        clearModel(state.scene);
+        unsubscribePusher();
+        state.currentModelId = model.id;
+        loaderEl.textContent = '加载中...';
+        await loadModel(model.url);
+        if (state.session?.access_token) await loadAnnotationsFromApi();
+        subscribePusher(state.currentModelId);
+        updateAnnotationList();
+        updateSelectionUI();
+        const list = await fetchModelList();
+        renderModelList(list);
+      }
     } catch (err) {
       console.error('加载模型失败:', err);
-      alert('加载模型失败: ' + (err.message || err));
-      createDefaultBuilding(state.scene);
-      state.currentModelId = await ensureDefaultModel();
-      if (state.currentModelId) await loadAnnotationsFromApi();
-      subscribePusher(state.currentModelId);
+      alert('加载/上传失败: ' + (err.message || err));
     } finally {
       loaderEl.classList.add('hidden');
+      loaderEl.textContent = '加载中...';
       e.target.value = '';
     }
   });
@@ -1211,6 +1337,8 @@ async function init() {
     subscribePusher(state.currentModelId);
     updateAnnotationList();
     updateSelectionUI();
+    const modelList = await fetchModelList();
+    renderModelList(modelList);
   });
 
   document.getElementById('btn-save').addEventListener('click', saveAnnotationsToApi);
