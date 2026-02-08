@@ -579,12 +579,12 @@ function updateAnnotationList() {
         <div class="annot-item-main">
           <span style="color:${a.color}">■</span>
           <span class="annot-item-label">${a.label || '未命名'}</span>
-          <div class="annot-item-actions">
-            <button type="button" class="btn-edit-annot" title="编辑">编辑</button>
-            <button type="button" class="btn-delete-annot" title="删除">删除</button>
-          </div>
         </div>
         <div class="annot-meta">${a.category || '-'} · ${targetsSummary(a.targets)}</div>
+        <div class="annot-item-actions">
+          <button type="button" class="btn-edit-annot" title="编辑">编辑</button>
+          <button type="button" class="btn-delete-annot" title="删除">删除</button>
+        </div>
       </li>
     `;
   }).join('');
@@ -610,7 +610,9 @@ function updateAnnotationList() {
       return;
     }
 
-    li.querySelector('.annot-item-main')?.addEventListener('click', (e) => {
+    const mainBlock = li.querySelector('.annot-item-main');
+    const metaBlock = li.querySelector('.annot-meta');
+    const handleFocus = (e) => {
       if (e.target.closest('.annot-item-actions')) return;
       state.selectedTargets.clear();
       annot.targets.forEach(t => {
@@ -618,7 +620,9 @@ function updateAnnotationList() {
       });
       updateHighlight();
       updateSelectionUI();
-    });
+    };
+    mainBlock?.addEventListener('click', handleFocus);
+    metaBlock?.addEventListener('click', handleFocus);
 
     li.querySelector('.btn-edit-annot')?.addEventListener('click', (e) => {
       e.stopPropagation();

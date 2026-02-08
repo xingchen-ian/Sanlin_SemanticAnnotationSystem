@@ -23,6 +23,19 @@ body {
   position: relative;
 }
 
+/* 窄屏时保证画布仍有最小可用空间 */
+@media (max-width: 560px) {
+  #app {
+    flex-direction: column;
+  }
+  #panel {
+    max-width: none;
+    width: 100%;
+    border-left: none;
+    border-top: 1px solid #333;
+  }
+}
+
 #canvas {
   display: block;
   width: 100%;
@@ -73,6 +86,9 @@ body {
 
 #panel {
   width: 280px;
+  min-width: 240px;
+  max-width: min(380px, 90vw);
+  flex-shrink: 0;
   background: #252525;
   padding: 16px;
   overflow-y: auto;
@@ -278,7 +294,6 @@ button:hover {
   display: flex;
   align-items: center;
   gap: 8px;
-  flex-wrap: wrap;
 }
 
 #annotation-list li .annot-item-main:hover {
@@ -288,19 +303,24 @@ button:hover {
 #annotation-list li .annot-item-label {
   flex: 1;
   min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 #annotation-list li .annot-item-actions {
   display: flex;
-  gap: 4px;
+  gap: 8px;
+  margin-top: 8px;
+  flex-shrink: 0;
 }
 
 #annotation-list li .btn-edit-annot,
 #annotation-list li .btn-delete-annot {
-  padding: 4px 8px;
-  font-size: 11px;
+  flex: 1;
+  min-width: 0;
+  padding: 6px 8px;
+  font-size: 12px;
   margin: 0;
-  flex: none;
 }
 
 #annotation-list li .btn-delete-annot {
@@ -323,9 +343,28 @@ button:hover {
 }
 
 .annot-edit-form input[type="color"] {
+  display: block;
   width: 100%;
-  height: 28px;
+  min-width: 0;
+  height: 36px;
+  min-height: 36px;
+  padding: 4px;
   margin-bottom: 8px;
+  border: 1px solid #444;
+  border-radius: 6px;
+  background: #333;
+  cursor: pointer;
+  -webkit-appearance: none;
+  appearance: none;
+}
+
+.annot-edit-form input[type="color"]::-webkit-color-swatch-wrapper {
+  padding: 2px;
+}
+
+.annot-edit-form input[type="color"]::-webkit-color-swatch {
+  border: none;
+  border-radius: 4px;
 }
 
 .annot-edit-actions {
