@@ -85,10 +85,11 @@ function createDefaultBuilding(scene) {
 }
 
 // ----- 从 glTF 场景提取 meshes -----
+// 使用 mesh_0, mesh_1... 替代 uuid，保证同一文件重载时 meshId 稳定，标注着色可正确匹配
 function extractMeshesFromObject(obj, parentMatrix = new THREE.Matrix4()) {
   const mat = new THREE.Matrix4().copy(parentMatrix).multiply(obj.matrixWorld);
   if (obj.isMesh && obj.geometry) {
-    const meshId = obj.uuid;
+    const meshId = `mesh_${state.meshIdCounter++}`;
     if (!state.meshes.some(m => m.meshId === meshId)) {
       obj.userData.meshId = meshId;
       const origMat = obj.material?.clone?.() ?? new THREE.MeshStandardMaterial({ color: 0x888888 });
