@@ -392,7 +392,8 @@ function updateCalloutOverlay() {
   ctx.clearRect(0, 0, canvas.width, canvas.height);
 
   const proj = new THREE.Vector3();
-  const LINE_LENGTH = 80;
+  const LINE_LENGTH = 90;
+  const S_CURVE_AMPLITUDE = 18;
   const FONT = '14px sans-serif';
 
   state.annotations.forEach((annot) => {
@@ -406,17 +407,22 @@ function updateCalloutOverlay() {
 
     const label = annot.label || '未命名';
     ctx.font = FONT;
-    const textW = ctx.measureText(label).width;
 
     const dx = px < canvas.width / 2 ? 1 : -1;
     const tx = px + dx * LINE_LENGTH;
     const ty = py;
 
+    const dist = tx - px;
+    const cp1x = px + 0.35 * dist;
+    const cp1y = py - S_CURVE_AMPLITUDE;
+    const cp2x = px + 0.65 * dist;
+    const cp2y = py + S_CURVE_AMPLITUDE;
+
     ctx.strokeStyle = '#ffffff';
     ctx.lineWidth = 1.5;
     ctx.beginPath();
     ctx.moveTo(px, py);
-    ctx.lineTo(tx, ty);
+    ctx.bezierCurveTo(cp1x, cp1y, cp2x, cp2y, tx, ty);
     ctx.stroke();
 
     ctx.fillStyle = '#ffffff';
