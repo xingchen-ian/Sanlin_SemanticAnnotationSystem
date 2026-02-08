@@ -6,6 +6,7 @@ import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.m
 import { OrbitControls } from 'https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/controls/OrbitControls.js';
 import { GLTFLoader } from 'https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/loaders/GLTFLoader.js';
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
+import Pusher from 'https://esm.sh/pusher-js';
 
 // ----- 状态 -----
 // 统一选择: Map<meshId, null|number[]>  null=整物体, number[]=指定面
@@ -39,6 +40,17 @@ const supabase = (() => {
   }
   return null;
 })();
+
+let pusherClient = null;
+let pusherChannel = null;
+
+function initPusher() {
+  const cfg = window.SANLIN_CONFIG || {};
+  if (cfg.pusherKey && cfg.pusherCluster && !pusherClient) {
+    pusherClient = new Pusher(cfg.pusherKey, { cluster: cfg.pusherCluster });
+  }
+  return pusherClient;
+}
 
 // ----- 创建默认示例建筑 -----
 function createDefaultBuilding(scene) {
@@ -898,6 +910,72 @@ async function handleLogout() {
   setAuthStatus('');
 }
 
+// ----- Pusher 实时同步 -----
+function apiToAnnot(a) {
+  return {
+    id: a.id,
+    targets: a.targets || [],
+    label: a.label || '未命名',
+    category: a.category || '',
+    color: a.color || '#FF9900',
+    createdAt: a.created_at ? new Date(a.created_at).getTime() : Date.now(),
+  };
+}
+
+function subscribePusher(modelId) {
+  unsubscribePusher();
+  const client = initPusher();
+  if (!client || !modelId) return;
+  const channelName = `model-${modelId}`;
+  pusherChannel = client.subscribe(channelName);
+
+  pusherChannel.bind('annotations-synced', (data) => {
+    state.annotations = (data || []).map(apiToAnnot);
+    updateAnnotationList();
+    updateHighlight();
+    updateCalloutOverlay();
+  });
+
+  pusherChannel.bind('annotation-updated', (data) => {
+    const idx = state.annotations.findIndex((a) => a.id === data?.id);
+    if (idx >= 0 && data) {
+      state.annotations[idx] = apiToAnnot(data);
+    } else if (data) {
+      state.annotations.push(apiToAnnot(data));
+    }
+    updateAnnotationList();
+    updateHighlight();
+    updateCalloutOverlay();
+  });
+
+  pusherChannel.bind('annotation-deleted', (data) => {
+    const id = data?.id;
+    if (id) {
+      state.annotations = state.annotations.filter((a) => a.id !== id);
+      state.hiddenAnnotationIds.delete(id);
+    }
+    updateAnnotationList();
+    updateHighlight();
+    updateCalloutOverlay();
+  });
+
+  pusherChannel.bind('annotation-created', (data) => {
+    if (data) {
+      state.annotations.push(apiToAnnot(data));
+      updateAnnotationList();
+      updateHighlight();
+      updateCalloutOverlay();
+    }
+  });
+}
+
+function unsubscribePusher() {
+  if (pusherChannel && pusherClient) {
+    pusherClient.unsubscribe(pusherChannel.name);
+    pusherChannel = null;
+  }
+}
+
 async function ensureDefaultModel() {
   const base = getApiUrl();
   if (!base) return null;
@@ -1096,6 +1174,7 @@ async function init() {
   await initAuth();
   state.currentModelId = await ensureDefaultModel();
   if (state.currentModelId && state.session?.access_token) await loadAnnotationsFromApi();
+  subscribePusher(state.currentModelId);
 
   canvas.addEventListener('mousedown', onPointerDown);
   canvas.addEventListener('click', onPointerClick);
@@ -1106,6 +1185,7 @@ async function init() {
     const file = e.target.files?.[0];
     if (!file) return;
     clearModel(state.scene);
+    unsubscribePusher();
     state.currentModelId = null;
     loaderEl.classList.remove('hidden');
     try {
@@ -1116,6 +1196,7 @@ async function init() {
       createDefaultBuilding(state.scene);
       state.currentModelId = await ensureDefaultModel();
       if (state.currentModelId) await loadAnnotationsFromApi();
+      subscribePusher(state.currentModelId);
     } finally {
       loaderEl.classList.add('hidden');
       e.target.value = '';
@@ -1127,6 +1208,7 @@ async function init() {
     createDefaultBuilding(state.scene);
     state.currentModelId = await ensureDefaultModel();
     if (state.currentModelId) await loadAnnotationsFromApi();
+    subscribePusher(state.currentModelId);
     updateAnnotationList();
     updateSelectionUI();
   });

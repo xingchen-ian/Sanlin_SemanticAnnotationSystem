@@ -4,4 +4,6 @@ window.SANLIN_CONFIG = {
   apiUrl: '',
   supabaseUrl: '',
   supabaseAnonKey: '',
+  pusherKey: '',
+  pusherCluster: 'us2',
 };

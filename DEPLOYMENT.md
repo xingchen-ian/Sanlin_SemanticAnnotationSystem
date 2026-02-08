@@ -59,6 +59,8 @@
    | VITE_API_URL | Railway API URL（如 https://xxx.railway.app） |
    | VITE_SUPABASE_URL | Supabase Project URL |
    | VITE_SUPABASE_ANON_KEY | Supabase anon/public key（Settings → API） |
+   | VITE_PUSHER_KEY | Pusher Key |
+   | VITE_PUSHER_CLUSTER | Pusher 集群（如 us2） |
 
 5. 确保 Build Command 为 `node scripts/gen-config.js`（vercel.json 已配置）
 
