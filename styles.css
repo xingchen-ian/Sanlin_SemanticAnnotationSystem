@@ -233,6 +233,33 @@ button:hover {
   min-width: 36px;
 }
 
+#persist-controls {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+#persist-controls button {
+  flex: 1;
+  margin-top: 0;
+  font-size: 12px;
+}
+
+#btn-save {
+  background: #0d7377;
+}
+
+#btn-load {
+  background: #333;
+}
+
+.persist-status {
+  font-size: 11px;
+  color: #666;
+  margin-bottom: 8px;
+  min-height: 1.2em;
+}
+
 #annotation-list {
   list-style: none;
 }

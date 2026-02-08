@@ -57,6 +57,8 @@
    |------|-----|
    | VITE_API_URL | Railway API URL（如 https://xxx.railway.app） |
 
+5. 确保 Build Command 为 `node scripts/gen-config.js`（vercel.json 已配置）
+
 5. 部署
 
 ## 5. 配置 CORS

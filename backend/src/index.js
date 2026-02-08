@@ -68,6 +68,29 @@ app.get('/api/models/:modelId/annotations', async (req, res) => {
   res.json(data || []);
 });
 
+// 批量替换标注
+app.put('/api/models/:modelId/annotations', async (req, res) => {
+  if (!supabase) return res.status(503).json({ error: 'Supabase not configured' });
+  const { modelId } = req.params;
+  const { annotations } = req.body;
+  if (!Array.isArray(annotations)) return res.status(400).json({ error: 'annotations must be array' });
+  const { error: delErr } = await supabase.from('annotations').delete().eq('model_id', modelId);
+  if (delErr) return res.status(500).json({ error: delErr.message });
+  if (annotations.length === 0) return res.json([]);
+  const rows = annotations.map((a) => ({
+    model_id: modelId,
+    targets: a.targets || [],
+    label: a.label || '未命名',
+    category: a.category || '',
+    color: a.color || '#FF9900',
+    author: a.author || '',
+  }));
+  const { data, error } = await supabase.from('annotations').insert(rows).select();
+  if (error) return res.status(500).json({ error: error.message });
+  if (pusher) pusher.trigger(`model-${modelId}`, 'annotations-synced', data).catch(console.error);
+  res.json(data || []);
+});
+
 app.post('/api/models/:modelId/annotations', async (req, res) => {
   if (!supabase) return res.status(503).json({ error: 'Supabase not configured' });
   const { modelId } = req.params;

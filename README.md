@@ -51,4 +51,8 @@ npx http-server -p 3000
 └── DEPLOYMENT.md         # 上线部署指南 (Vercel + Railway + Supabase + Pusher)
 ```
 
+## 保存/加载标注
+
+部署后，在 Vercel 环境变量中设置 `VITE_API_URL` 为 Railway API 地址，即可使用「保存标注」和「加载标注」将数据持久化到 Supabase。仅对「示例建筑」生效。
+
 在线部署见 [DEPLOYMENT.md](./DEPLOYMENT.md)。

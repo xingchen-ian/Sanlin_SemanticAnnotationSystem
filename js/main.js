@@ -25,6 +25,7 @@ const state = {
   justDidBoxSelect: false,
   faceOverlayMeshes: new Map(),  // meshId -> THREE.Mesh (face highlight overlay)
   overlayOpacity: 0.45,
+  currentModelId: null,  // 当前模型的 Supabase ID，用于保存/加载
 };
 
 // ----- 创建默认示例建筑 -----
@@ -646,6 +647,94 @@ function addToAnnotation() {
   updateHighlight();
 }
 
+// ----- API 持久化 -----
+function getApiUrl() {
+  return (window.SANLIN_CONFIG?.apiUrl || '').replace(/\/$/, '');
+}
+
+function setPersistStatus(msg, isError = false) {
+  const el = document.getElementById('persist-status');
+  if (!el) return;
+  el.textContent = msg;
+  el.style.color = isError ? '#e57373' : '#666';
+}
+
+async function ensureDefaultModel() {
+  const base = getApiUrl();
+  if (!base) return null;
+  try {
+    const r = await fetch(`${base}/api/models`);
+    const models = await r.json();
+    let m = models.find((x) => x.url === 'builtin://default');
+    if (!m) {
+      const cr = await fetch(`${base}/api/models`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: '默认建筑', url: 'builtin://default' }),
+      });
+      m = await cr.json();
+    }
+    return m?.id || null;
+  } catch (e) {
+    console.error('ensureDefaultModel:', e);
+    return null;
+  }
+}
+
+async function loadAnnotationsFromApi() {
+  const base = getApiUrl();
+  const modelId = state.currentModelId;
+  if (!base || !modelId) return;
+  setPersistStatus('加载中...');
+  try {
+    const r = await fetch(`${base}/api/models/${modelId}/annotations`);
+    const data = await r.json();
+    state.annotations = (data || []).map((a) => ({
+      id: a.id,
+      targets: a.targets || [],
+      label: a.label || '未命名',
+      category: a.category || '',
+      color: a.color || '#FF9900',
+      createdAt: a.created_at ? new Date(a.created_at).getTime() : Date.now(),
+    }));
+    updateAnnotationList();
+    updateHighlight();
+    setPersistStatus(`已加载 ${state.annotations.length} 条标注`);
+  } catch (e) {
+    console.error('loadAnnotations:', e);
+    setPersistStatus('加载失败', true);
+  }
+}
+
+async function saveAnnotationsToApi() {
+  const base = getApiUrl();
+  const modelId = state.currentModelId;
+  if (!base || !modelId) {
+    setPersistStatus('请先配置 API 地址并加载示例建筑', true);
+    return;
+  }
+  setPersistStatus('保存中...');
+  try {
+    const payload = state.annotations.map((a) => ({
+      targets: a.targets,
+      label: a.label,
+      category: a.category,
+      color: a.color,
+    }));
+    const r = await fetch(`${base}/api/models/${modelId}/annotations`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ annotations: payload }),
+    });
+    if (!r.ok) throw new Error(await r.text());
+    const data = await r.json();
+    setPersistStatus(`已保存 ${(data || []).length} 条标注`);
+  } catch (e) {
+    console.error('saveAnnotations:', e);
+    setPersistStatus('保存失败', true);
+  }
+}
+
 // ----- 确保 Canvas 有有效尺寸 -----
 function getCanvasSize(canvas) {
   const container = canvas?.parentElement;
@@ -707,6 +796,9 @@ async function init() {
   createDefaultBuilding(state.scene);
   loaderEl.classList.add('hidden');
 
+  state.currentModelId = await ensureDefaultModel();
+  if (state.currentModelId) await loadAnnotationsFromApi();
+
   canvas.addEventListener('mousedown', onPointerDown);
   canvas.addEventListener('click', onPointerClick);
   window.addEventListener('mousemove', onPointerMove);
@@ -716,6 +808,7 @@ async function init() {
     const file = e.target.files?.[0];
     if (!file) return;
     clearModel(state.scene);
+    state.currentModelId = null;
     loaderEl.classList.remove('hidden');
     try {
       await loadModel(file);
@@ -723,18 +816,25 @@ async function init() {
       console.error('加载模型失败:', err);
       alert('加载模型失败: ' + (err.message || err));
       createDefaultBuilding(state.scene);
+      state.currentModelId = await ensureDefaultModel();
+      if (state.currentModelId) await loadAnnotationsFromApi();
     } finally {
       loaderEl.classList.add('hidden');
       e.target.value = '';
     }
   });
 
-  document.getElementById('btn-default-model').addEventListener('click', () => {
+  document.getElementById('btn-default-model').addEventListener('click', async () => {
     clearModel(state.scene);
     createDefaultBuilding(state.scene);
+    state.currentModelId = await ensureDefaultModel();
+    if (state.currentModelId) await loadAnnotationsFromApi();
     updateAnnotationList();
     updateSelectionUI();
   });
+
+  document.getElementById('btn-save').addEventListener('click', saveAnnotationsToApi);
+  document.getElementById('btn-load').addEventListener('click', loadAnnotationsFromApi);
 
   document.getElementById('btn-add-annotation').addEventListener('click', addAnnotation);
   document.getElementById('btn-add-to-annot').addEventListener('click', addToAnnotation);

@@ -55,11 +55,17 @@
           <input type="range" id="annot-opacity" min="0.1" max="1" step="0.05" value="0.45" />
           <span id="opacity-value">45%</span>
         </div>
+        <div id="persist-controls">
+          <button id="btn-save">保存标注</button>
+          <button id="btn-load">加载标注</button>
+        </div>
+        <div id="persist-status" class="persist-status"></div>
         <ul id="annotation-list"></ul>
       </section>
     </aside>
   </div>
 
+  <script src="js/config.js"></script>
   <script type="importmap">
   {
     "imports": {
