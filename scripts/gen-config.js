@@ -5,10 +5,14 @@
 const fs = require('fs');
 const path = require('path');
 const apiUrl = process.env.VITE_API_URL || process.env.API_URL || '';
+const supabaseUrl = process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL || '';
+const supabaseAnonKey = process.env.VITE_SUPABASE_ANON_KEY || process.env.SUPABASE_ANON_KEY || '';
 const out = path.join(__dirname, '../js/config.js');
 const content = `// 自动生成 - 请勿直接编辑
 window.SANLIN_CONFIG = {
   apiUrl: '${apiUrl.replace(/'/g, "\\'")}',
+  supabaseUrl: '${supabaseUrl.replace(/'/g, "\\'")}',
+  supabaseAnonKey: '${supabaseAnonKey.replace(/'/g, "\\'")}',
 };
 `;
 fs.writeFileSync(out, content, 'utf8');

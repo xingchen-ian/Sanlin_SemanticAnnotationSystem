@@ -5,6 +5,7 @@
 import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js';
 import { OrbitControls } from 'https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/controls/OrbitControls.js';
 import { GLTFLoader } from 'https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/loaders/GLTFLoader.js';
+import { createClient } from '@supabase/supabase-js';
 
 // ----- 状态 -----
 // 统一选择: Map<meshId, null|number[]>  null=整物体, number[]=指定面
@@ -28,7 +29,16 @@ const state = {
   currentModelId: null,  // 当前模型的 Supabase ID，用于保存/加载
   editingIndex: null,    // 正在编辑的标注索引
   hiddenAnnotationIds: new Set(),  // 被隐藏的标注层 id，不参与着色与引线
+  session: null,         // Supabase Auth session
 };
+
+const supabase = (() => {
+  const cfg = window.SANLIN_CONFIG || {};
+  if (cfg.supabaseUrl && cfg.supabaseAnonKey) {
+    return createClient(cfg.supabaseUrl, cfg.supabaseAnonKey);
+  }
+  return null;
+})();
 
 // ----- 创建默认示例建筑 -----
 function createDefaultBuilding(scene) {
@@ -662,7 +672,7 @@ async function saveEditAnnotation(idx, { label, category, color }) {
     try {
       await fetch(`${base}/api/models/${modelId}/annotations/${a.id}`, {
         method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
+        headers: getAuthHeaders(),
         body: JSON.stringify({ label, category, color }),
       });
     } catch (e) {
@@ -682,7 +692,10 @@ async function deleteAnnotation(idx) {
   const modelId = state.currentModelId;
   if (base && modelId && isServerId(a.id)) {
     try {
-      await fetch(`${base}/api/models/${modelId}/annotations/${a.id}`, { method: 'DELETE' });
+      await fetch(`${base}/api/models/${modelId}/annotations/${a.id}`, {
+        method: 'DELETE',
+        headers: getAuthHeaders(),
+      });
     } catch (e) {
       console.error('deleteAnnotation:', e);
     }
@@ -771,11 +784,119 @@ function getApiUrl() {
   return (window.SANLIN_CONFIG?.apiUrl || '').replace(/\/$/, '');
 }
 
+function getAuthHeaders() {
+  const h = { 'Content-Type': 'application/json' };
+  if (state.session?.access_token) {
+    h['Authorization'] = `Bearer ${state.session.access_token}`;
+  }
+  return h;
+}
+
 function setPersistStatus(msg, isError = false) {
   const el = document.getElementById('persist-status');
   if (!el) return;
   el.textContent = msg;
   el.style.color = isError ? '#e57373' : '#666';
+}
+
+// ----- 用户登录 (Supabase Auth) -----
+function setAuthStatus(msg, isError = false) {
+  const el = document.getElementById('auth-status');
+  if (!el) return;
+  el.textContent = msg;
+  el.className = 'auth-status' + (isError ? ' error' : '');
+}
+
+function updateAuthUI() {
+  const loggedOut = document.getElementById('auth-logged-out');
+  const loggedIn = document.getElementById('auth-logged-in');
+  const emailEl = document.getElementById('auth-user-email');
+  if (!loggedOut || !loggedIn) return;
+  if (state.session?.user) {
+    loggedOut.classList.add('hidden');
+    loggedIn.classList.remove('hidden');
+    if (emailEl) emailEl.textContent = state.session.user.email || '';
+  } else {
+    loggedOut.classList.remove('hidden');
+    loggedIn.classList.add('hidden');
+  }
+}
+
+async function initAuth() {
+  const authSection = document.getElementById('auth-section');
+  if (!supabase) {
+    if (authSection) authSection.classList.add('hidden');
+    return;
+  }
+  try {
+    const { data: { session } } = await supabase.auth.getSession();
+    state.session = session;
+    supabase.auth.onAuthStateChange((_event, session) => {
+      state.session = session;
+      updateAuthUI();
+    });
+  } catch (e) {
+    console.error('initAuth:', e);
+  }
+  updateAuthUI();
+}
+
+async function handleLogin() {
+  if (!supabase) {
+    setAuthStatus('Supabase 未配置', true);
+    return;
+  }
+  const email = document.getElementById('auth-email')?.value?.trim();
+  const password = document.getElementById('auth-password')?.value;
+  if (!email || !password) {
+    setAuthStatus('请输入邮箱和密码', true);
+    return;
+  }
+  setAuthStatus('登录中...');
+  try {
+    const { data, error } = await supabase.auth.signInWithPassword({ email, password });
+    if (error) throw error;
+    state.session = data.session;
+    updateAuthUI();
+    setAuthStatus('');
+  } catch (e) {
+    setAuthStatus(e.message || '登录失败', true);
+  }
+}
+
+async function handleRegister() {
+  if (!supabase) {
+    setAuthStatus('Supabase 未配置', true);
+    return;
+  }
+  const email = document.getElementById('auth-email')?.value?.trim();
+  const password = document.getElementById('auth-password')?.value;
+  if (!email || !password) {
+    setAuthStatus('请输入邮箱和密码', true);
+    return;
+  }
+  if (password.length < 6) {
+    setAuthStatus('密码至少 6 位', true);
+    return;
+  }
+  setAuthStatus('注册中...');
+  try {
+    const { data, error } = await supabase.auth.signUp({ email, password });
+    if (error) throw error;
+    state.session = data.session;
+    updateAuthUI();
+    setAuthStatus(data.user?.identities?.length ? '注册成功' : '请查收邮件确认');
+  } catch (e) {
+    setAuthStatus(e.message || '注册失败', true);
+  }
+}
+
+async function handleLogout() {
+  if (!supabase) return;
+  await supabase.auth.signOut();
+  state.session = null;
+  updateAuthUI();
+  setAuthStatus('');
 }
 
 async function ensureDefaultModel() {
@@ -804,9 +925,19 @@ async function loadAnnotationsFromApi() {
   const base = getApiUrl();
   const modelId = state.currentModelId;
   if (!base || !modelId) return;
+  if (!state.session?.access_token) {
+    setPersistStatus('请先登录', true);
+    return;
+  }
   setPersistStatus('加载中...');
   try {
-    const r = await fetch(`${base}/api/models/${modelId}/annotations`);
+    const r = await fetch(`${base}/api/models/${modelId}/annotations`, {
+      headers: getAuthHeaders(),
+    });
+    if (r.status === 401) {
+      setPersistStatus('请先登录', true);
+      return;
+    }
     const data = await r.json();
     state.annotations = (data || []).map((a) => ({
       id: a.id,
@@ -832,19 +963,29 @@ async function saveAnnotationsToApi() {
     setPersistStatus('请先配置 API 地址并加载示例建筑', true);
     return;
   }
+  if (!state.session?.access_token) {
+    setPersistStatus('请先登录', true);
+    return;
+  }
   setPersistStatus('保存中...');
   try {
+    const author = state.session?.user?.email || '';
     const payload = state.annotations.map((a) => ({
       targets: a.targets,
       label: a.label,
       category: a.category,
       color: a.color,
+      author,
     }));
     const r = await fetch(`${base}/api/models/${modelId}/annotations`, {
       method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
+      headers: getAuthHeaders(),
       body: JSON.stringify({ annotations: payload }),
     });
+    if (r.status === 401) {
+      setPersistStatus('请先登录', true);
+      return;
+    }
     if (!r.ok) throw new Error(await r.text());
     const data = await r.json();
     state.annotations = (data || []).map((a) => ({
@@ -953,8 +1094,9 @@ async function init() {
   createDefaultBuilding(state.scene);
   loaderEl.classList.add('hidden');
 
+  await initAuth();
   state.currentModelId = await ensureDefaultModel();
-  if (state.currentModelId) await loadAnnotationsFromApi();
+  if (state.currentModelId && state.session?.access_token) await loadAnnotationsFromApi();
 
   canvas.addEventListener('mousedown', onPointerDown);
   canvas.addEventListener('click', onPointerClick);
@@ -993,6 +1135,10 @@ async function init() {
   document.getElementById('btn-save').addEventListener('click', saveAnnotationsToApi);
   document.getElementById('btn-load').addEventListener('click', loadAnnotationsFromApi);
   document.getElementById('btn-export').addEventListener('click', exportAnnotations);
+
+  document.getElementById('btn-login')?.addEventListener('click', handleLogin);
+  document.getElementById('btn-register')?.addEventListener('click', handleRegister);
+  document.getElementById('btn-logout')?.addEventListener('click', handleLogout);
 
   document.getElementById('btn-add-annotation').addEventListener('click', addAnnotation);
   document.getElementById('btn-add-to-annot').addEventListener('click', addToAnnotation);

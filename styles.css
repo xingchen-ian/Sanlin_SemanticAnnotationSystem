@@ -106,6 +106,60 @@ body {
   color: #aaa;
 }
 
+#auth-logged-out input {
+  width: 100%;
+  margin-bottom: 8px;
+}
+
+#auth-logged-out input[type="email"],
+#auth-logged-out input[type="password"] {
+  padding: 8px 12px;
+  border-radius: 6px;
+  border: 1px solid #444;
+  background: #333;
+  color: #e0e0e0;
+  font-size: 13px;
+}
+
+.auth-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.auth-actions button {
+  flex: 1;
+  margin-top: 0;
+}
+
+#auth-logged-in {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+#auth-user-email {
+  flex: 1;
+  font-size: 13px;
+  color: #aaa;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+#btn-logout {
+  flex-shrink: 0;
+}
+
+.auth-status {
+  font-size: 12px;
+  color: #888;
+  margin-top: 8px;
+}
+
+.auth-status.error {
+  color: #e57373;
+}
+
 .mode-toggle {
   display: flex;
   gap: 8px;

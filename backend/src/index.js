@@ -34,6 +34,22 @@ const pusher = process.env.PUSHER_APP_ID
     })
   : null;
 
+// Auth middleware - 验证 JWT，要求 Authorization: Bearer <token>
+async function requireAuth(req, res, next) {
+  const authHeader = req.headers.authorization;
+  const token = authHeader?.startsWith('Bearer ') ? authHeader.slice(7) : null;
+  if (!token) return res.status(401).json({ error: '请先登录' });
+  if (!supabase) return res.status(503).json({ error: 'Supabase not configured' });
+  try {
+    const { data: { user }, error } = await supabase.auth.getUser(token);
+    if (error || !user) return res.status(401).json({ error: '请先登录' });
+    req.user = user;
+    next();
+  } catch (e) {
+    res.status(401).json({ error: '请先登录' });
+  }
+}
+
 // Health
 app.get('/api/health', (req, res) => {
   res.json({
@@ -59,8 +75,8 @@ app.post('/api/models', async (req, res) => {
   res.json(data);
 });
 
-// Annotations API (示例)
-app.get('/api/models/:modelId/annotations', async (req, res) => {
+// Annotations API (需登录)
+app.get('/api/models/:modelId/annotations', requireAuth, async (req, res) => {
   if (!supabase) return res.status(503).json({ error: 'Supabase not configured' });
   const { modelId } = req.params;
   const { data, error } = await supabase
@@ -72,7 +88,7 @@ app.get('/api/models/:modelId/annotations', async (req, res) => {
 });
 
 // 批量替换标注
-app.put('/api/models/:modelId/annotations', async (req, res) => {
+app.put('/api/models/:modelId/annotations', requireAuth, async (req, res) => {
   if (!supabase) return res.status(503).json({ error: 'Supabase not configured' });
   const { modelId } = req.params;
   const { annotations } = req.body;
@@ -94,7 +110,7 @@ app.put('/api/models/:modelId/annotations', async (req, res) => {
   res.json(data || []);
 });
 
-app.patch('/api/models/:modelId/annotations/:id', async (req, res) => {
+app.patch('/api/models/:modelId/annotations/:id', requireAuth, async (req, res) => {
   if (!supabase) return res.status(503).json({ error: 'Supabase not configured' });
   const { modelId, id } = req.params;
   const { label, category, color, targets } = req.body;
@@ -117,7 +133,7 @@ app.patch('/api/models/:modelId/annotations/:id', async (req, res) => {
   res.json(data);
 });
 
-app.delete('/api/models/:modelId/annotations/:id', async (req, res) => {
+app.delete('/api/models/:modelId/annotations/:id', requireAuth, async (req, res) => {
   if (!supabase) return res.status(503).json({ error: 'Supabase not configured' });
   const { modelId, id } = req.params;
   const { data, error } = await supabase
@@ -132,7 +148,7 @@ app.delete('/api/models/:modelId/annotations/:id', async (req, res) => {
   res.json({ deleted: true, id });
 });
 
-app.post('/api/models/:modelId/annotations', async (req, res) => {
+app.post('/api/models/:modelId/annotations', requireAuth, async (req, res) => {
   if (!supabase) return res.status(503).json({ error: 'Supabase not configured' });
   const { modelId } = req.params;
   const { targets, label, category, color, author, layer_id } = req.body;

@@ -19,7 +19,8 @@
 
 1. 访问 [supabase.com](https://supabase.com) 创建项目
 2. 在 SQL Editor 中执行 `supabase/migrations/001_initial.sql`
-3. 在 Settings → API 中复制 `Project URL` 和 `service_role` key
+3. 在 Settings → API 中复制 `Project URL`、`anon/public` key、`service_role` key
+4. 在 Authentication → Providers 中启用 **Email**（邮箱+密码登录）
 
 ## 2. Pusher
 
@@ -56,6 +57,8 @@
    | 变量 | 值 |
    |------|-----|
    | VITE_API_URL | Railway API URL（如 https://xxx.railway.app） |
+   | VITE_SUPABASE_URL | Supabase Project URL |
+   | VITE_SUPABASE_ANON_KEY | Supabase anon/public key（Settings → API） |
 
 5. 确保 Build Command 为 `node scripts/gen-config.js`（vercel.json 已配置）
 
