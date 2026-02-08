@@ -877,6 +877,33 @@ async function saveAnnotationsToApi() {
   }
 }
 
+// ----- 导出标注数据为 JSON 文件 -----
+function exportAnnotations() {
+  const payload = {
+    exportedAt: new Date().toISOString(),
+    modelId: state.currentModelId || null,
+    annotations: state.annotations.map((a) => ({
+      id: a.id,
+      targets: a.targets || [],
+      label: a.label || '未命名',
+      category: a.category || '',
+      color: a.color || '#FF9900',
+      createdAt: a.createdAt != null ? a.createdAt : Date.now(),
+    })),
+  };
+  const json = JSON.stringify(payload, null, 2);
+  const blob = new Blob([json], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  const ts = new Date();
+  const fn = `annotations_${ts.getFullYear()}${String(ts.getMonth() + 1).padStart(2, '0')}${String(ts.getDate()).padStart(2, '0')}_${String(ts.getHours()).padStart(2, '0')}${String(ts.getMinutes()).padStart(2, '0')}${String(ts.getSeconds()).padStart(2, '0')}.json`;
+  a.download = fn;
+  a.click();
+  URL.revokeObjectURL(url);
+  setPersistStatus(`已导出 ${state.annotations.length} 条标注`);
+}
+
 // ----- 确保 Canvas 有有效尺寸 -----
 function getCanvasSize(canvas) {
   const container = canvas?.parentElement;
@@ -977,6 +1004,7 @@ async function init() {
 
   document.getElementById('btn-save').addEventListener('click', saveAnnotationsToApi);
   document.getElementById('btn-load').addEventListener('click', loadAnnotationsFromApi);
+  document.getElementById('btn-export').addEventListener('click', exportAnnotations);
 
   document.getElementById('btn-add-annotation').addEventListener('click', addAnnotation);
   document.getElementById('btn-add-to-annot').addEventListener('click', addToAnnotation);
