@@ -10,7 +10,10 @@ import Pusher from 'pusher';
 const app = express();
 const PORT = process.env.PORT || 3001;
 
-app.use(cors({ origin: process.env.FRONTEND_URL || '*' }));
+const frontendOrigin = process.env.FRONTEND_URL
+  ? process.env.FRONTEND_URL.replace(/\/$/, '')
+  : '*';
+app.use(cors({ origin: frontendOrigin }));
 app.use(express.json({ limit: '10mb' }));
 
 // Supabase
