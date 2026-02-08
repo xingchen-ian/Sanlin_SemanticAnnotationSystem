@@ -296,6 +296,11 @@ button:hover {
   gap: 8px;
 }
 
+#annotation-list li .annot-layer-visible {
+  flex-shrink: 0;
+  cursor: pointer;
+}
+
 #annotation-list li .annot-item-main:hover {
   color: #fff;
 }

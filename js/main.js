@@ -27,6 +27,7 @@ const state = {
   overlayOpacity: 0.45,
   currentModelId: null,  // 当前模型的 Supabase ID，用于保存/加载
   editingIndex: null,    // 正在编辑的标注索引
+  hiddenAnnotationIds: new Set(),  // 被隐藏的标注层 id，不参与着色与引线
 };
 
 // ----- 创建默认示例建筑 -----
@@ -86,6 +87,7 @@ function clearModel(scene) {
   state.selectedTargets.clear();
   state.annotations = [];
   state.meshIdCounter = 0;
+  state.hiddenAnnotationIds.clear();
 }
 
 // ----- 加载 glTF/GLB -----
@@ -392,11 +394,12 @@ function updateCalloutOverlay() {
   ctx.clearRect(0, 0, canvas.width, canvas.height);
 
   const proj = new THREE.Vector3();
-  const LINE_LENGTH = 90;
+  const LINE_LENGTH = 150;
   const S_CURVE_AMPLITUDE = 18;
   const FONT = '14px sans-serif';
 
   state.annotations.forEach((annot) => {
+    if (state.hiddenAnnotationIds.has(annot.id)) return;
     const worldCenter = getAnnotationWorldCenter(annot);
     if (!worldCenter) return;
     proj.copy(worldCenter).project(state.camera);
@@ -457,7 +460,9 @@ function updateHighlight() {
 
   state.meshes.forEach(({ mesh, meshId, originalMaterial }) => {
     const sel = state.selectedTargets.get(meshId);
-    const annots = getAnnotationsForMesh(meshId);
+    const annots = getAnnotationsForMesh(meshId).filter(
+      (a) => !state.hiddenAnnotationIds.has(a.id)
+    );
 
     mesh.material = originalMaterial;
 
@@ -580,9 +585,11 @@ function updateAnnotationList() {
         </li>
       `;
     }
+    const visible = !state.hiddenAnnotationIds.has(a.id);
     return `
-      <li class="annot-item" data-index="${i}" title="点击聚焦">
+      <li class="annot-item" data-index="${i}" data-id="${(a.id || '').toString().replace(/"/g, '&quot;')}" title="点击聚焦">
         <div class="annot-item-main">
+          <input type="checkbox" class="annot-layer-visible" ${visible ? 'checked' : ''} title="显示/隐藏此层着色与引线" aria-label="显隐" />
           <span style="color:${a.color}">■</span>
           <span class="annot-item-label">${a.label || '未命名'}</span>
         </div>
@@ -629,6 +636,16 @@ function updateAnnotationList() {
     };
     mainBlock?.addEventListener('click', handleFocus);
     metaBlock?.addEventListener('click', handleFocus);
+
+    li.querySelector('.annot-layer-visible')?.addEventListener('change', (e) => {
+      e.stopPropagation();
+      const id = annot.id;
+      if (e.target.checked) state.hiddenAnnotationIds.delete(id);
+      else state.hiddenAnnotationIds.add(id);
+      updateHighlight();
+      updateCalloutOverlay();
+    });
+    li.querySelector('.annot-layer-visible')?.addEventListener('click', (e) => e.stopPropagation());
 
     li.querySelector('.btn-edit-annot')?.addEventListener('click', (e) => {
       e.stopPropagation();
