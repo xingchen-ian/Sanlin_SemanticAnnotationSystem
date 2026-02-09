@@ -1055,17 +1055,21 @@ async function uploadModelToApi(file, name) {
       setPersistStatus('请先登录', true);
       return null;
     }
+    const bodyText = await r.text();
     if (!r.ok) {
       let msg = '上传失败';
-      try {
-        const err = await r.json();
-        msg = err.error || msg;
-      } catch {
-        msg = await r.text() || msg;
+      if (r.status === 413) msg = '文件过大，请压缩或分块后上传';
+      else {
+        try {
+          const err = JSON.parse(bodyText);
+          msg = err.error || msg;
+        } catch {
+          msg = bodyText?.trim() || msg;
+        }
       }
       throw new Error(msg);
     }
-    return await r.json();
+    return JSON.parse(bodyText);
   } catch (e) {
     setPersistStatus(e.message || '上传失败', true);
     return null;
