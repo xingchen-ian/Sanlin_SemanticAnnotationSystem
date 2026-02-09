@@ -111,8 +111,8 @@ app.post('/api/models/upload', requireAuth, upload.single('file'), async (req, r
   const file = req.file;
   if (!file) return res.status(400).json({ error: 'No file uploaded' });
   const ext = file.originalname.split('.').pop() || 'glb';
-  if (!['glb', 'gltf'].includes(ext.toLowerCase())) {
-    return res.status(400).json({ error: 'Only .glb or .gltf files allowed' });
+  if (!['glb', 'gltf', 'obj'].includes(ext.toLowerCase())) {
+    return res.status(400).json({ error: 'Only .glb, .gltf or .obj files allowed' });
   }
   const name = req.body.name || file.originalname || '未命名模型';
   const path = `${crypto.randomUUID()}.${ext}`;

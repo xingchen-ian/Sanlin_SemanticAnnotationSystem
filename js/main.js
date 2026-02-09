@@ -5,6 +5,7 @@
 import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js';
 import { OrbitControls } from 'https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/controls/OrbitControls.js';
 import { GLTFLoader } from 'https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/loaders/GLTFLoader.js';
+import { OBJLoader } from 'https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/loaders/OBJLoader.js';
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 import Pusher from 'https://esm.sh/pusher-js';
 
@@ -113,11 +114,52 @@ function clearModel(scene) {
   state.hiddenAnnotationIds.clear();
 }
 
-// ----- 加载 glTF/GLB -----
+// ----- 判断是否为 OBJ 格式 -----
+function isObjUrlOrFile(urlOrFile) {
+  if (typeof urlOrFile === 'string') {
+    return urlOrFile.toLowerCase().includes('.obj');
+  }
+  const name = urlOrFile?.name ?? '';
+  return name.toLowerCase().endsWith('.obj');
+}
+
+// ----- 加载 OBJ -----
+function loadObjAsync(urlOrFile) {
+  const loader = new OBJLoader();
+  if (typeof urlOrFile === 'string') {
+    const baseUrl = urlOrFile.replace(/[^/]+$/, '');
+    if (baseUrl) loader.setResourcePath(baseUrl);
+    return new Promise((resolve, reject) => {
+      loader.load(urlOrFile, resolve, undefined, reject);
+    });
+  }
+  const url = URL.createObjectURL(urlOrFile);
+  return new Promise((resolve, reject) => {
+    loader.load(url, (group) => {
+      URL.revokeObjectURL(url);
+      resolve(group);
+    }, undefined, (err) => {
+      URL.revokeObjectURL(url);
+      reject(err);
+    });
+  });
+}
+
+// ----- 加载 glTF/GLB 或 OBJ -----
 async function loadModel(urlOrFile) {
+  const useObj = isObjUrlOrFile(urlOrFile);
+
+  if (useObj) {
+    const group = await loadObjAsync(urlOrFile);
+    group.traverse(obj => { obj.userData.isLoadedModel = true; });
+    state.scene.add(group);
+    extractMeshesFromObject(group);
+    frameModelInView(state.scene, group);
+    return group;
+  }
+
   const loader = new GLTFLoader();
   let gltf;
-
   if (typeof urlOrFile === 'string') {
     gltf = await loader.loadAsync(urlOrFile);
   } else {
