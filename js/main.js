@@ -425,7 +425,8 @@ function updateCalloutOverlay() {
     const label = annot.label || '未命名';
     ctx.font = FONT;
 
-    const dx = px < canvas.width / 2 ? 1 : -1;
+    // 左侧标注向左上、右侧向右上，引线朝两侧外指，减少交叉
+    const dx = px < canvas.width / 2 ? -1 : 1;
     const tx = px + dx * LINE_LENGTH * cos45;
     const ty = py - LINE_LENGTH * sin45;
 
