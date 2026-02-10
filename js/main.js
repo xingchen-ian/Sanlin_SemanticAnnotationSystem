@@ -6,7 +6,7 @@ import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.m
 import { OrbitControls } from 'https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/controls/OrbitControls.js';
 import { GLTFLoader } from 'https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/loaders/GLTFLoader.js';
 import { OBJLoader } from 'https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/loaders/OBJLoader.js';
-import { Loader3DTiles } from 'three-loader-3dtiles';
+import { TilesRenderer } from '3d-tiles-renderer';
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 import Pusher from 'https://esm.sh/pusher-js';
 
@@ -33,7 +33,7 @@ const state = {
   editingIndex: null,    // 正在编辑的标注索引
   hiddenAnnotationIds: new Set(),  // 被隐藏的标注层 id，不参与着色与引线
   session: null,         // Supabase Auth session
-  tilesRuntime: null,   // 3D Tiles runtime（每帧 update）
+  tilesRenderer: null,  // 3d-tiles-renderer 实例（每帧 update）
   tilesetRoot: null,    // 3D Tiles 根 Group，用于同步 mesh 列表
 };
 
@@ -106,10 +106,12 @@ function extractMeshesFromObject(obj, parentMatrix = new THREE.Matrix4()) {
 // ----- 清空当前模型 -----
 function clearModel(scene) {
   state.faceOverlayMeshes.clear();
-  state.tilesRuntime = null;
+  if (state.tilesRenderer) {
+    state.tilesRenderer.dispose();
+    state.tilesRenderer = null;
+  }
   state.tilesetRoot = null;
   state._tilesRuntimeErrorLogged = false;
-  state._tilesRuntimeDelayFrames = null;
   const toRemove = scene.children.filter(c =>
     c.name === 'default_building' || c.userData?.isLoadedModel
   );
@@ -195,37 +197,33 @@ function syncTilesetMeshes() {
   });
 }
 
-// ----- 加载 3D Tiles（tileset.json 的完整 URL） -----
-async function loadTileset(tilesetUrl) {
+// ----- 加载 3D Tiles（tileset.json 的完整 URL，使用 NASA 3d-tiles-renderer） -----
+function loadTileset(tilesetUrl) {
   let url = tilesetUrl?.trim();
   if (!url) throw new Error('请输入 tileset.json 的 URL');
-  // 相对路径转为绝对 URL，便于 loader 正确解析 tileset 内子瓦片路径
   if (url.startsWith('/') || url.startsWith('./')) {
     url = new URL(url, window.location.origin).href;
   }
-  const canvas = state.renderer?.domElement;
-  const viewport = {
-    width: canvas?.clientWidth ?? window.innerWidth,
-    height: canvas?.clientHeight ?? window.innerHeight,
-    devicePixelRatio: window.devicePixelRatio ?? 1,
-  };
-  const result = await Loader3DTiles.load({
-    url,
-    viewport,
-    options: {
-      dracoDecoderPath: 'https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/libs/draco/',
-      basisTranscoderPath: 'https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/libs/basis/',
-    },
+  const tilesRenderer = new TilesRenderer(url);
+  tilesRenderer.setCamera(state.camera);
+  tilesRenderer.setResolutionFromRenderer(state.camera, state.renderer);
+  tilesRenderer.group.traverse((o) => { o.userData.isLoadedModel = true; });
+  state.scene.add(tilesRenderer.group);
+  state.tilesetRoot = tilesRenderer.group;
+  state.tilesRenderer = tilesRenderer;
+
+  const sphere = new THREE.Sphere();
+  tilesRenderer.addEventListener('load-root-tileset', () => {
+    if (tilesRenderer.getBoundingSphere(sphere)) {
+      tilesRenderer.group.position.copy(sphere.center).multiplyScalar(-1);
+    }
+    syncTilesetMeshes();
+    frameModelInView(state.scene, tilesRenderer.group);
   });
-  const { model, runtime } = result;
-  model.traverse((o) => { o.userData.isLoadedModel = true; });
-  state.scene.add(model);
-  state.tilesetRoot = model;
-  state.tilesRuntime = runtime;
-  state._tilesRuntimeDelayFrames = null;
+
   syncTilesetMeshes();
-  frameModelInView(state.scene, model);
-  return model;
+  frameModelInView(state.scene, tilesRenderer.group);
+  return tilesRenderer.group;
 }
 
 // ----- 获取当前在场景中的 mesh 列表（3D Tiles 会动态加载/卸载，只对在场景中的做射线检测） -----
@@ -1559,7 +1557,7 @@ async function init() {
       clearModel(state.scene);
       unsubscribePusher();
       state.currentModelId = null; // 3D Tiles 暂不绑定后端模型，标注仅本地/导出
-      await loadTileset(url);
+      loadTileset(url);
       updateAnnotationList();
       updateSelectionUI();
     } catch (err) {
@@ -1625,18 +1623,11 @@ async function init() {
     const now = performance.now();
     const dt = Math.min((now - lastTime) / 1000, 0.2);
     lastTime = now;
-    state.controls.update(); // 先更新相机，再给 3D Tiles runtime 用，避免内部用到未更新的 matrix
-    if (state.tilesRuntime) {
-      try {
-        const canvas = state.renderer.domElement;
-        state.tilesRuntime.update(dt, canvas.clientHeight ?? window.innerHeight, state.camera);
-        syncTilesetMeshes();
-      } catch (e) {
-        if (!state._tilesRuntimeErrorLogged) {
-          state._tilesRuntimeErrorLogged = true;
-          console.warn('3D Tiles runtime.update 报错（已捕获）:', e?.message || e);
-        }
-      }
+    state.controls.update();
+    if (state.tilesRenderer) {
+      state.camera.updateMatrixWorld(true);
+      state.tilesRenderer.update();
+      syncTilesetMeshes();
     }
     state.renderer.render(state.scene, state.camera);
     updateCalloutOverlay();
