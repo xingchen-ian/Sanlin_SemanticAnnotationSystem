@@ -1496,7 +1496,9 @@ function frameModelInView(scene, model) {
   const box = new THREE.Box3().setFromObject(model);
   const center = box.getCenter(new THREE.Vector3());
   const size = box.getSize(new THREE.Vector3());
-  const maxDim = Math.max(size.x, size.y, size.z, 1);
+  let maxDim = Math.max(size.x, size.y, size.z, 1);
+  // 3D Tiles 刚加载时 group 可能为空，maxDim=1 会导致相机几乎在原点、看不到后续加载的瓦片
+  if (maxDim < 100) maxDim = 500;
   const dist = maxDim * 1.5;
   state.camera.position.set(center.x + dist * 0.7, center.y + dist * 0.5, center.z + dist * 0.7);
   state.controls.target.copy(center);
