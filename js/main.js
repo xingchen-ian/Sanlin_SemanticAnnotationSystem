@@ -30,6 +30,12 @@ const state = {
   boxSelectStart: null,
   isBoxSelecting: false,
   justDidBoxSelect: false,
+  rightMouseDown: false,
+  keys: { w: false, a: false, s: false, d: false, q: false, e: false },
+  flySpeed: 25,
+  _flyForward: new THREE.Vector3(),
+  _flyRight: new THREE.Vector3(),
+  _flyUp: new THREE.Vector3(0, 1, 0),
   faceOverlayMeshes: new Map(),  // meshId -> THREE.Mesh (face highlight overlay)
   overlayOpacity: 0.45,
   currentModelId: null,  // 当前模型的 Supabase ID，用于保存/加载
@@ -428,6 +434,10 @@ function updateSelectionRect(start, end, canvas) {
 
 // ----- 指针事件 -----
 function onPointerDown(event) {
+  if (event.button === 2) {
+    state.rightMouseDown = true;
+    return;
+  }
   if (event.button !== 0) return;
   if (!event.altKey) return; // 仅 Alt + 拖拽 进入框选
   const canvas = document.getElementById('canvas');
@@ -445,6 +455,10 @@ function onPointerMove(event) {
 }
 
 function onPointerUp(event) {
+  if (event.button === 2) {
+    state.rightMouseDown = false;
+    return;
+  }
   if (event.button !== 0) return;
   const canvas = document.getElementById('canvas');
 
@@ -1506,8 +1520,22 @@ async function init() {
 
   canvas.addEventListener('mousedown', onPointerDown);
   canvas.addEventListener('click', onPointerClick);
+  canvas.addEventListener('contextmenu', (e) => e.preventDefault());
   window.addEventListener('mousemove', onPointerMove);
   window.addEventListener('mouseup', onPointerUp);
+
+  const keyToFly = { KeyW: 'w', KeyA: 'a', KeyS: 's', KeyD: 'd', KeyQ: 'q', KeyE: 'e' };
+  window.addEventListener('keydown', (e) => {
+    const k = keyToFly[e.code];
+    if (k) {
+      state.keys[k] = true;
+      if (state.rightMouseDown) e.preventDefault();
+    }
+  });
+  window.addEventListener('keyup', (e) => {
+    const k = keyToFly[e.code];
+    if (k) state.keys[k] = false;
+  });
 
   document.getElementById('model-input').addEventListener('change', async (e) => {
     const file = e.target.files?.[0];
@@ -1635,6 +1663,19 @@ async function init() {
     const dt = Math.min((now - lastTime) / 1000, 0.2);
     lastTime = now;
     state.controls.update();
+    if (state.rightMouseDown && state.controls && (state.keys.w || state.keys.a || state.keys.s || state.keys.d || state.keys.q || state.keys.e)) {
+      const speed = state.flySpeed * dt;
+      state.camera.getWorldDirection(state._flyForward);
+      state._flyForward.y = 0;
+      state._flyForward.normalize();
+      state._flyRight.crossVectors(state._flyForward, state._flyUp);
+      if (state.keys.w) { state.camera.position.addScaledVector(state._flyForward, speed); state.controls.target.addScaledVector(state._flyForward, speed); }
+      if (state.keys.s) { state.camera.position.addScaledVector(state._flyForward, -speed); state.controls.target.addScaledVector(state._flyForward, -speed); }
+      if (state.keys.a) { state.camera.position.addScaledVector(state._flyRight, -speed); state.controls.target.addScaledVector(state._flyRight, -speed); }
+      if (state.keys.d) { state.camera.position.addScaledVector(state._flyRight, speed); state.controls.target.addScaledVector(state._flyRight, speed); }
+      if (state.keys.q) { state.camera.position.y += speed; state.controls.target.y += speed; }
+      if (state.keys.e) { state.camera.position.y -= speed; state.controls.target.y -= speed; }
+    }
     if (state.tilesRenderer) {
       state.camera.updateMatrixWorld(true);
       state.tilesRenderer.update();
