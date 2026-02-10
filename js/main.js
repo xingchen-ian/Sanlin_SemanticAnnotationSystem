@@ -225,8 +225,6 @@ function loadTileset(tilesetUrl) {
   tilesRenderer.manager.addHandler(/\.(gltf|glb)$/gi, gltfLoader);
 
   tilesRenderer.group.traverse((o) => { o.userData.isLoadedModel = true; });
-  // 3D Tiles 常见为 Z-up（Cesium/GIS），Three.js 为 Y-up；绕 X 轴 -90° 使地面水平
-  tilesRenderer.group.rotation.x = -Math.PI / 2;
   state.scene.add(tilesRenderer.group);
   state.tilesetRoot = tilesRenderer.group;
   state.tilesRenderer = tilesRenderer;
@@ -1473,13 +1471,6 @@ function frameModelInView(scene, model) {
   const dist = maxDim * 1.5;
   state.camera.position.set(center.x + dist * 0.7, center.y + dist * 0.5, center.z + dist * 0.7);
   state.controls.target.copy(center);
-  // 保持“只绕 Y 轴旋转”：用当前俯仰角锁定
-  const d = state.camera.position.distanceTo(state.controls.target);
-  if (d > 1e-6) {
-    const polar = Math.acos(Math.max(-1, Math.min(1, (state.camera.position.y - state.controls.target.y) / d)));
-    state.controls.minPolarAngle = polar;
-    state.controls.maxPolarAngle = polar;
-  }
 }
 
 // ----- 初始化 -----
@@ -1510,11 +1501,6 @@ async function init() {
     MIDDLE: THREE.MOUSE.DOLLY,
     RIGHT: THREE.MOUSE.ROTATE,
   };
-  // 右键拖拽只绕 Y 轴（纵轴）旋转，不倾斜：锁定俯仰角为当前角度，画面保持“正”
-  const dist = state.camera.position.distanceTo(controls.target);
-  const polar = Math.acos(Math.max(-1, Math.min(1, (state.camera.position.y - controls.target.y) / dist)));
-  controls.minPolarAngle = polar;
-  controls.maxPolarAngle = polar;
   state.controls = controls;
 
   const ambient = new THREE.AmbientLight(0xffffff, 1.0);
