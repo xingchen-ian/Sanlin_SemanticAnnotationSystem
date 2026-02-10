@@ -4,23 +4,9 @@
  */
 import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js';
 import { OrbitControls } from 'https://cdn.jsdelivr.net/npm/three@0.170.0/examples/jsm/controls/OrbitControls.js';
-import { GLTFLoader } from 'https://cdn.jsdelivr.net/npm/three@0.170.0/examples/jsm/loaders/GLTFLoader.js';
+import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { DRACOLoader } from 'https://cdn.jsdelivr.net/npm/three@0.170.0/examples/jsm/loaders/DRACOLoader.js';
 import { OBJLoader } from 'https://cdn.jsdelivr.net/npm/three@0.170.0/examples/jsm/loaders/OBJLoader.js';
-
-// 3d-tiles-renderer 的 B3DMLoader 内部会 new GLTFLoader()，不会走 manager.addHandler，
-// 因此必须在全局为 GLTFLoader 注入 DRACOLoader，否则 b3dm 内嵌的 Draco 会报错
-const DRACO_PATH = 'https://cdn.jsdelivr.net/npm/three@0.170.0/examples/jsm/libs/draco/gltf/';
-const _parse = GLTFLoader.prototype.parse;
-GLTFLoader.prototype.parse = function parse(data, path, onLoad, onError) {
-  if (!this.dracoLoader) {
-    const draco = new DRACOLoader();
-    draco.setDecoderPath(DRACO_PATH);
-    this.setDRACOLoader(draco);
-  }
-  return _parse.call(this, data, path, onLoad, onError);
-};
-
 import { TilesRenderer } from '3d-tiles-renderer';
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 import Pusher from 'https://esm.sh/pusher-js';
