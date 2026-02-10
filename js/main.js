@@ -227,6 +227,8 @@ function loadTileset(tilesetUrl) {
   tilesRenderer.group.traverse((o) => { o.userData.isLoadedModel = true; });
   // 3D Tiles 常见为 Z-up（Cesium/GIS），Three.js 为 Y-up；绕 X 轴 -90° 使地面水平
   tilesRenderer.group.rotation.x = -Math.PI / 2;
+  // 水平方向再转 -45° 摆正朝向（若仍歪可改为 +Math.PI/4）
+  tilesRenderer.group.rotation.y = -Math.PI / 4;
   state.scene.add(tilesRenderer.group);
   state.tilesetRoot = tilesRenderer.group;
   state.tilesRenderer = tilesRenderer;
