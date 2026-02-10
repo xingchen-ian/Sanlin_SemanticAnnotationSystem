@@ -195,8 +195,12 @@ function syncTilesetMeshes() {
 
 // ----- 加载 3D Tiles（tileset.json 的完整 URL） -----
 async function loadTileset(tilesetUrl) {
-  const url = tilesetUrl?.trim();
+  let url = tilesetUrl?.trim();
   if (!url) throw new Error('请输入 tileset.json 的 URL');
+  // 相对路径转为绝对 URL，便于 loader 正确解析 tileset 内子瓦片路径
+  if (url.startsWith('/') || url.startsWith('./')) {
+    url = new URL(url, window.location.origin).href;
+  }
   const canvas = state.renderer?.domElement;
   const viewport = {
     width: canvas?.clientWidth ?? window.innerWidth,
