@@ -108,6 +108,7 @@ function clearModel(scene) {
   state.faceOverlayMeshes.clear();
   state.tilesRuntime = null;
   state.tilesetRoot = null;
+  state._tilesRuntimeErrorLogged = false;
   const toRemove = scene.children.filter(c =>
     c.name === 'default_building' || c.userData?.isLoadedModel
   );
@@ -1623,9 +1624,17 @@ async function init() {
     const dt = Math.min((now - lastTime) / 1000, 0.2);
     lastTime = now;
     if (state.tilesRuntime) {
-      const canvas = state.renderer.domElement;
-      state.tilesRuntime.update(dt, canvas.clientHeight ?? window.innerHeight, state.camera);
-      syncTilesetMeshes();
+      try {
+        const canvas = state.renderer.domElement;
+        state.tilesRuntime.update(dt, canvas.clientHeight ?? window.innerHeight, state.camera);
+        syncTilesetMeshes();
+      } catch (e) {
+        // runtime 在瓦片未就绪时可能访问未初始化的矩阵，跳过本帧避免崩溃
+        if (state.tilesRuntime && !state._tilesRuntimeErrorLogged) {
+          state._tilesRuntimeErrorLogged = true;
+          console.warn('3D Tiles runtime update 暂时跳过:', e?.message || e);
+        }
+      }
     }
     state.controls.update();
     state.renderer.render(state.scene, state.camera);
