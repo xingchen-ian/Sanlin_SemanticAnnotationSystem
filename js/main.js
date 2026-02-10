@@ -7,8 +7,21 @@ import { OrbitControls } from 'https://cdn.jsdelivr.net/npm/three@0.170.0/exampl
 import { GLTFLoader } from 'https://cdn.jsdelivr.net/npm/three@0.170.0/examples/jsm/loaders/GLTFLoader.js';
 import { DRACOLoader } from 'https://cdn.jsdelivr.net/npm/three@0.170.0/examples/jsm/loaders/DRACOLoader.js';
 import { OBJLoader } from 'https://cdn.jsdelivr.net/npm/three@0.170.0/examples/jsm/loaders/OBJLoader.js';
+
+// 3d-tiles-renderer 的 B3DMLoader 内部会 new GLTFLoader()，不会走 manager.addHandler，
+// 因此必须在全局为 GLTFLoader 注入 DRACOLoader，否则 b3dm 内嵌的 Draco 会报错
+const DRACO_PATH = 'https://cdn.jsdelivr.net/npm/three@0.170.0/examples/jsm/libs/draco/gltf/';
+const _parse = GLTFLoader.prototype.parse;
+GLTFLoader.prototype.parse = function parse(data, path, onLoad, onError) {
+  if (!this.dracoLoader) {
+    const draco = new DRACOLoader();
+    draco.setDecoderPath(DRACO_PATH);
+    this.setDRACOLoader(draco);
+  }
+  return _parse.call(this, data, path, onLoad, onError);
+};
+
 import { TilesRenderer } from '3d-tiles-renderer';
-import { GLTFExtensionsPlugin } from '3d-tiles-renderer/three/plugins';
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 import Pusher from 'https://esm.sh/pusher-js';
 
@@ -210,16 +223,9 @@ function loadTileset(tilesetUrl) {
   tilesRenderer.setCamera(state.camera);
   tilesRenderer.setResolutionFromRenderer(state.camera, state.renderer);
 
-  // b3dm 内嵌的 glTF 可能使用 Draco 压缩：用插件注入 DRACO，并为 manager 注册带 DRACO 的 GLTFLoader
-  const dracoPath = 'https://cdn.jsdelivr.net/npm/three@0.170.0/examples/jsm/libs/draco/gltf/';
-  try {
-    const gltfPlugin = new GLTFExtensionsPlugin(THREE, { dracoDecoderPath: dracoPath });
-    tilesRenderer.registerPlugin(gltfPlugin);
-  } catch (_) {
-    // 插件 API 可能因版本不同，仅依赖下方 addHandler
-  }
+  // manager 也注册带 DRACO 的 GLTFLoader，供部分加载路径使用（主路径已通过全局 patch 注入）
   const dracoLoader = new DRACOLoader();
-  dracoLoader.setDecoderPath(dracoPath);
+  dracoLoader.setDecoderPath(DRACO_PATH);
   const gltfLoader = new GLTFLoader(tilesRenderer.manager);
   gltfLoader.setDRACOLoader(dracoLoader);
   tilesRenderer.manager.addHandler(/\.(gltf|glb)$/gi, gltfLoader);
