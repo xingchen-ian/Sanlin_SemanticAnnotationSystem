@@ -5,8 +5,10 @@
 import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js';
 import { OrbitControls } from 'https://cdn.jsdelivr.net/npm/three@0.170.0/examples/jsm/controls/OrbitControls.js';
 import { GLTFLoader } from 'https://cdn.jsdelivr.net/npm/three@0.170.0/examples/jsm/loaders/GLTFLoader.js';
+import { DRACOLoader } from 'https://cdn.jsdelivr.net/npm/three@0.170.0/examples/jsm/loaders/DRACOLoader.js';
 import { OBJLoader } from 'https://cdn.jsdelivr.net/npm/three@0.170.0/examples/jsm/loaders/OBJLoader.js';
 import { TilesRenderer } from '3d-tiles-renderer';
+import { GLTFExtensionsPlugin } from '3d-tiles-renderer/three/plugins';
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 import Pusher from 'https://esm.sh/pusher-js';
 
@@ -207,6 +209,21 @@ function loadTileset(tilesetUrl) {
   const tilesRenderer = new TilesRenderer(url);
   tilesRenderer.setCamera(state.camera);
   tilesRenderer.setResolutionFromRenderer(state.camera, state.renderer);
+
+  // b3dm 内嵌的 glTF 可能使用 Draco 压缩：用插件注入 DRACO，并为 manager 注册带 DRACO 的 GLTFLoader
+  const dracoPath = 'https://cdn.jsdelivr.net/npm/three@0.170.0/examples/jsm/libs/draco/gltf/';
+  try {
+    const gltfPlugin = new GLTFExtensionsPlugin(THREE, { dracoDecoderPath: dracoPath });
+    tilesRenderer.registerPlugin(gltfPlugin);
+  } catch (_) {
+    // 插件 API 可能因版本不同，仅依赖下方 addHandler
+  }
+  const dracoLoader = new DRACOLoader();
+  dracoLoader.setDecoderPath(dracoPath);
+  const gltfLoader = new GLTFLoader(tilesRenderer.manager);
+  gltfLoader.setDRACOLoader(dracoLoader);
+  tilesRenderer.manager.addHandler(/\.(gltf|glb)$/gi, gltfLoader);
+
   tilesRenderer.group.traverse((o) => { o.userData.isLoadedModel = true; });
   state.scene.add(tilesRenderer.group);
   state.tilesetRoot = tilesRenderer.group;
