@@ -115,16 +115,16 @@ function extractMeshesFromObject(obj, parentMatrix = new THREE.Matrix4()) {
 // ----- 清空当前模型 -----
 function clearModel(scene) {
   state.faceOverlayMeshes.clear();
-  if (state.tilesRenderer) {
-    state.tilesRenderer.dispose();
-    state.tilesRenderer = null;
-  }
   state.tilesetRoot = null;
   state._tilesRuntimeErrorLogged = false;
   const toRemove = scene.children.filter(c =>
     c.name === 'default_building' || c.userData?.isLoadedModel
   );
   toRemove.forEach(c => scene.remove(c));
+  if (state.tilesRenderer) {
+    state.tilesRenderer.dispose();
+    state.tilesRenderer = null;
+  }
   state.meshes = [];
   state.selectedTargets.clear();
   state.annotations = [];
@@ -230,17 +230,36 @@ function loadTileset(tilesetUrl) {
   state.tilesRenderer = tilesRenderer;
 
   const sphere = new THREE.Sphere();
-  tilesRenderer.addEventListener('load-root-tileset', () => {
-    if (tilesRenderer.getBoundingSphere(sphere)) {
-      tilesRenderer.group.position.copy(sphere.center).multiplyScalar(-1);
-    }
-    syncTilesetMeshes();
-    frameModelInView(state.scene, tilesRenderer.group);
+  return new Promise((resolve, reject) => {
+    let timeoutId;
+    const onRootLoaded = () => {
+      clearTimeout(timeoutId);
+      tilesRenderer.removeEventListener('load-root-tileset', onRootLoaded);
+      tilesRenderer.removeEventListener('error', onError);
+      if (tilesRenderer.getBoundingSphere(sphere)) {
+        tilesRenderer.group.position.copy(sphere.center).multiplyScalar(-1);
+      }
+      syncTilesetMeshes();
+      frameModelInView(state.scene, tilesRenderer.group);
+      resolve(tilesRenderer.group);
+    };
+    const onError = (e) => {
+      clearTimeout(timeoutId);
+      tilesRenderer.removeEventListener('load-root-tileset', onRootLoaded);
+      tilesRenderer.removeEventListener('error', onError);
+      reject(new Error(e?.message || '3D Tiles 加载失败'));
+    };
+    tilesRenderer.addEventListener('load-root-tileset', onRootLoaded);
+    tilesRenderer.addEventListener('error', onError);
+    // 若未触发 load-root-tileset（如 URL 错误），8 秒后 resolve 避免 loader 一直转
+    timeoutId = setTimeout(() => {
+      tilesRenderer.removeEventListener('load-root-tileset', onRootLoaded);
+      tilesRenderer.removeEventListener('error', onError);
+      syncTilesetMeshes();
+      frameModelInView(state.scene, tilesRenderer.group);
+      resolve(tilesRenderer.group);
+    }, 8000);
   });
-
-  syncTilesetMeshes();
-  frameModelInView(state.scene, tilesRenderer.group);
-  return tilesRenderer.group;
 }
 
 // ----- 获取当前在场景中的 mesh 列表（3D Tiles 会动态加载/卸载，只对在场景中的做射线检测） -----
@@ -1601,7 +1620,7 @@ async function init() {
       clearModel(state.scene);
       unsubscribePusher();
       state.currentModelId = null; // 3D Tiles 暂不绑定后端模型，标注仅本地/导出
-      loadTileset(url);
+      await loadTileset(url);
       updateAnnotationList();
       updateSelectionUI();
     } catch (err) {
