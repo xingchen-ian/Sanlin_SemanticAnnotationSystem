@@ -1514,8 +1514,8 @@ function frameModelInView(scene, model) {
   const center = box.getCenter(new THREE.Vector3());
   const size = box.getSize(new THREE.Vector3());
   let maxDim = Math.max(size.x, size.y, size.z, 1);
-  // 3D Tiles 刚加载时 group 可能为空，maxDim=1 会导致相机几乎在原点、看不到后续加载的瓦片
-  if (maxDim < 100) maxDim = 500;
+  // 仅当包围盒几乎为空（如 3D Tiles 刚加载时）才拉远相机，否则普通小模型会变成一个小点
+  if (maxDim < 5) maxDim = 500;
   const dist = maxDim * 1.5;
   state.camera.position.set(center.x + dist * 0.7, center.y + dist * 0.5, center.z + dist * 0.7);
   state.controls.target.copy(center);
@@ -1625,7 +1625,8 @@ async function init() {
 
   document.getElementById('btn-default-model').addEventListener('click', async () => {
     clearModel(state.scene);
-    createDefaultBuilding(state.scene);
+    const group = createDefaultBuilding(state.scene);
+    frameModelInView(state.scene, group);
     state.currentModelId = await ensureDefaultModel();
     if (state.currentModelId) await loadAnnotationsFromApi();
     subscribePusher(state.currentModelId);
