@@ -40,6 +40,10 @@
         <input type="file" id="model-input" accept=".glb,.gltf,.obj" />
         <input type="text" id="model-name-input" placeholder="模型名称（可选）" class="model-name-input" />
         <button id="btn-default-model">加载示例建筑</button>
+        <div class="tileset-load">
+          <input type="text" id="tileset-url-input" placeholder="3D Tiles tileset.json 的 URL" class="tileset-url-input" />
+          <button id="btn-load-tileset">加载 3D Tiles</button>
+        </div>
         <div id="model-list-section">
           <h3 class="model-list-title">我的模型</h3>
           <ul id="model-list"></ul>
@@ -92,7 +96,8 @@
   {
     "imports": {
       "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
-      "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+      "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/",
+      "three-loader-3dtiles": "https://cdn.jsdelivr.net/npm/three-loader-3dtiles@1.2.7/dist/lib/three-loader-3dtiles.js"
     }
   }
   </script>

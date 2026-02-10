@@ -166,6 +166,19 @@ body {
   margin-bottom: 8px;
 }
 
+.tileset-load {
+  margin-top: 10px;
+  margin-bottom: 8px;
+}
+.tileset-url-input {
+  width: 100%;
+  margin-bottom: 6px;
+  padding: 6px 8px;
+}
+.tileset-load button {
+  width: 100%;
+}
+
 #model-list-section {
   margin-top: 12px;
   padding-top: 12px;

@@ -6,6 +6,7 @@ import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.m
 import { OrbitControls } from 'https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/controls/OrbitControls.js';
 import { GLTFLoader } from 'https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/loaders/GLTFLoader.js';
 import { OBJLoader } from 'https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/loaders/OBJLoader.js';
+import { Loader3DTiles } from 'three-loader-3dtiles';
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 import Pusher from 'https://esm.sh/pusher-js';
 
@@ -32,6 +33,8 @@ const state = {
   editingIndex: null,    // 正在编辑的标注索引
   hiddenAnnotationIds: new Set(),  // 被隐藏的标注层 id，不参与着色与引线
   session: null,         // Supabase Auth session
+  tilesRuntime: null,   // 3D Tiles runtime（每帧 update）
+  tilesetRoot: null,    // 3D Tiles 根 Group，用于同步 mesh 列表
 };
 
 const supabase = (() => {
@@ -103,6 +106,8 @@ function extractMeshesFromObject(obj, parentMatrix = new THREE.Matrix4()) {
 // ----- 清空当前模型 -----
 function clearModel(scene) {
   state.faceOverlayMeshes.clear();
+  state.tilesRuntime = null;
+  state.tilesetRoot = null;
   const toRemove = scene.children.filter(c =>
     c.name === 'default_building' || c.userData?.isLoadedModel
   );
@@ -175,6 +180,52 @@ async function loadModel(urlOrFile) {
   return gltf.scene;
 }
 
+// ----- 3D Tiles：从 tileset 根节点同步已加载的 mesh 到 state.meshes（供选择/标注） -----
+function syncTilesetMeshes() {
+  if (!state.tilesetRoot) return;
+  state.tilesetRoot.traverse((obj) => {
+    if (!obj.isMesh || !obj.geometry) return;
+    if (state.meshes.some((m) => m.mesh === obj)) return;
+    const meshId = `mesh_${state.meshIdCounter++}`;
+    obj.userData.meshId = meshId;
+    const origMat = obj.material?.clone?.() ?? new THREE.MeshStandardMaterial({ color: 0x888888 });
+    state.meshes.push({ mesh: obj, meshId, originalMaterial: origMat });
+  });
+}
+
+// ----- 加载 3D Tiles（tileset.json 的完整 URL） -----
+async function loadTileset(tilesetUrl) {
+  const url = tilesetUrl?.trim();
+  if (!url) throw new Error('请输入 tileset.json 的 URL');
+  const canvas = state.renderer?.domElement;
+  const viewport = {
+    width: canvas?.clientWidth ?? window.innerWidth,
+    height: canvas?.clientHeight ?? window.innerHeight,
+    devicePixelRatio: window.devicePixelRatio ?? 1,
+  };
+  const result = await Loader3DTiles.load({
+    url,
+    viewport,
+    options: {
+      dracoDecoderPath: 'https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/libs/draco/',
+      basisTranscoderPath: 'https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/libs/basis/',
+    },
+  });
+  const { model, runtime } = result;
+  model.traverse((o) => { o.userData.isLoadedModel = true; });
+  state.scene.add(model);
+  state.tilesetRoot = model;
+  state.tilesRuntime = runtime;
+  syncTilesetMeshes();
+  frameModelInView(state.scene, model);
+  return model;
+}
+
+// ----- 获取当前在场景中的 mesh 列表（3D Tiles 会动态加载/卸载，只对在场景中的做射线检测） -----
+function getActiveMeshes() {
+  return state.meshes.filter((m) => m.mesh.parent != null);
+}
+
 // ----- 获取鼠标在 canvas 内的坐标 -----
 function getCanvasCoords(event, canvas) {
   const rect = canvas.getBoundingClientRect();
@@ -230,10 +281,8 @@ function performClickSelect(event) {
   state.mouse.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
 
   state.raycaster.setFromCamera(state.mouse, state.camera);
-  const intersects = state.raycaster.intersectObjects(
-    state.meshes.map(m => m.mesh),
-    true
-  );
+  const activeMeshes = getActiveMeshes().map((m) => m.mesh);
+  const intersects = state.raycaster.intersectObjects(activeMeshes, true);
 
   if (intersects.length === 0) {
     if (!event.shiftKey) state.selectedTargets.clear();
@@ -312,8 +361,9 @@ function performBoxSelect(startNDC, endNDC) {
   const selected = new Map();
   const proj = new THREE.Vector3();
 
+  const active = getActiveMeshes();
   if (state.selectionMode === 'object') {
-    state.meshes.forEach(({ mesh, meshId }) => {
+    active.forEach(({ mesh, meshId }) => {
       mesh.getWorldPosition(proj);
       proj.project(state.camera);
       if (proj.x >= left && proj.x <= right && proj.y >= bottom && proj.y <= top) {
@@ -321,7 +371,8 @@ function performBoxSelect(startNDC, endNDC) {
       }
     });
   } else {
-    state.meshes.forEach(({ mesh, meshId }) => {
+    active.forEach(({ mesh, meshId }) => {
+      if (!mesh.geometry) return;
       const geo = mesh.geometry;
       const faceCount = geo.index ? geo.index.count / 3 : geo.attributes.position.count / 3;
       const facesInBox = [];
@@ -517,6 +568,7 @@ function updateHighlight() {
   state.faceOverlayMeshes.clear();
 
   state.meshes.forEach(({ mesh, meshId, originalMaterial }) => {
+    if (!mesh.parent) return; // 3D Tiles 中可能已从场景卸载
     const sel = state.selectedTargets.get(meshId);
     const annots = getAnnotationsForMesh(meshId).filter(
       (a) => !state.hiddenAnnotationIds.has(a.id)
@@ -1071,7 +1123,11 @@ async function uploadModelToApi(file, name) {
     }
     return JSON.parse(bodyText);
   } catch (e) {
-    setPersistStatus(e.message || '上传失败', true);
+    const isNetworkError = e?.message === 'Failed to fetch' || e?.name === 'TypeError';
+    const msg = isNetworkError
+      ? '网络错误或上传超时，请检查网络与文件大小（限制约 50MB）'
+      : (e?.message || '上传失败');
+    setPersistStatus(msg, true);
     return null;
   }
 }
@@ -1482,6 +1538,32 @@ async function init() {
     renderModelList(modelList);
   });
 
+  document.getElementById('btn-load-tileset').addEventListener('click', async () => {
+    const input = document.getElementById('tileset-url-input');
+    const url = input?.value?.trim();
+    if (!url) {
+      setPersistStatus('请输入 tileset.json 的 URL', true);
+      return;
+    }
+    loaderEl.classList.remove('hidden');
+    loaderEl.textContent = '加载 3D Tiles...';
+    setPersistStatus('');
+    try {
+      clearModel(state.scene);
+      unsubscribePusher();
+      state.currentModelId = null; // 3D Tiles 暂不绑定后端模型，标注仅本地/导出
+      await loadTileset(url);
+      updateAnnotationList();
+      updateSelectionUI();
+    } catch (err) {
+      console.error('loadTileset:', err);
+      setPersistStatus(err?.message || '加载 3D Tiles 失败', true);
+    } finally {
+      loaderEl.classList.add('hidden');
+      loaderEl.textContent = '加载中...';
+    }
+  });
+
   document.getElementById('btn-save').addEventListener('click', saveAnnotationsToApi);
   document.getElementById('btn-load').addEventListener('click', loadAnnotationsFromApi);
   document.getElementById('btn-export').addEventListener('click', exportAnnotations);
@@ -1530,8 +1612,17 @@ async function init() {
   updateSelectionUI();
   updateAnnotationList();
 
+  let lastTime = performance.now();
   function animate() {
     requestAnimationFrame(animate);
+    const now = performance.now();
+    const dt = Math.min((now - lastTime) / 1000, 0.2);
+    lastTime = now;
+    if (state.tilesRuntime) {
+      const canvas = state.renderer.domElement;
+      state.tilesRuntime.update(dt, canvas.clientHeight ?? window.innerHeight, state.camera);
+      syncTilesetMeshes();
+    }
     state.controls.update();
     state.renderer.render(state.scene, state.camera);
     updateCalloutOverlay();
