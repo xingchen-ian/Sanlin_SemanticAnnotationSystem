@@ -227,12 +227,7 @@ function loadTileset(tilesetUrl) {
   tilesRenderer.group.traverse((o) => { o.userData.isLoadedModel = true; });
   // 3D Tiles 常见为 Z-up（Cesium/GIS），Three.js 为 Y-up；绕 X 轴 -90° 使地面水平
   tilesRenderer.group.rotation.x = -Math.PI / 2;
-  // 水平 45° 用外层 wrapper，避免直接旋 group 影响 TilesRenderer 加载
-  const tilesWrapper = new THREE.Group();
-  tilesWrapper.userData.isLoadedModel = true;
-  tilesWrapper.rotation.y = -Math.PI / 4;
-  tilesWrapper.add(tilesRenderer.group);
-  state.scene.add(tilesWrapper);
+  state.scene.add(tilesRenderer.group);
   state.tilesetRoot = tilesRenderer.group;
   state.tilesRenderer = tilesRenderer;
 
