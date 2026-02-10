@@ -224,8 +224,22 @@ async function loadTileset(tilesetUrl) {
     console.warn('[3D Tiles] HEAD 预检失败，继续尝试加载:', e?.message || e);
   }
 
-  // 避免 304 导致部分环境拿不到响应体，强制带查询参数使首请求返回 200
   const tilesetUrlWithCacheBust = url + (url.includes('?') ? '&' : '?') + '_=' + Date.now();
+  // 先拉取并解析 tileset.json，提前把根节点中心算好，这样在 TilesRenderer 第一次 update 前就能设好 group.position，
+  // 否则相机在几百单位而瓦片在数百万单位，视锥剔除会认为“不可见”从而不请求任何 .b3dm
+  let rootCenter = null;
+  try {
+    const res = await fetch(tilesetUrlWithCacheBust);
+    if (!res.ok) throw new Error('tileset.json ' + res.status);
+    const json = await res.json();
+    const box = json?.root?.boundingVolume?.box;
+    if (box && box.length >= 3) {
+      rootCenter = new THREE.Vector3(-box[0], -box[1], -box[2]);
+    }
+  } catch (e) {
+    console.warn('[3D Tiles] 预解析 tileset 失败，将依赖 load-root-tileset 再定位:', e?.message || e);
+  }
+
   const tilesRenderer = new TilesRenderer(tilesetUrlWithCacheBust);
   tilesRenderer.setCamera(state.camera);
   tilesRenderer.setResolutionFromRenderer(state.camera, state.renderer);
@@ -238,6 +252,7 @@ async function loadTileset(tilesetUrl) {
 
   tilesRenderer.group.traverse((o) => { o.userData.isLoadedModel = true; });
   tilesRenderer.group.rotation.x = -Math.PI / 2;
+  if (rootCenter) tilesRenderer.group.position.copy(rootCenter);
   state.scene.add(tilesRenderer.group);
   state.tilesetRoot = tilesRenderer.group;
   state.tilesRenderer = tilesRenderer;
@@ -249,7 +264,7 @@ async function loadTileset(tilesetUrl) {
       clearTimeout(timeoutId);
       tilesRenderer.removeEventListener('load-root-tileset', onRootLoaded);
       tilesRenderer.removeEventListener('error', onError);
-      if (tilesRenderer.getBoundingSphere(sphere)) {
+      if (!rootCenter && tilesRenderer.getBoundingSphere(sphere)) {
         tilesRenderer.group.position.copy(sphere.center).multiplyScalar(-1);
       }
       syncTilesetMeshes();
