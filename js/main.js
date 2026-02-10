@@ -225,6 +225,8 @@ function loadTileset(tilesetUrl) {
   tilesRenderer.manager.addHandler(/\.(gltf|glb)$/gi, gltfLoader);
 
   tilesRenderer.group.traverse((o) => { o.userData.isLoadedModel = true; });
+  // 3D Tiles 常见为 Z-up（Cesium/GIS），Three.js 为 Y-up；绕 X 轴 -90° 使地面水平
+  tilesRenderer.group.rotation.x = -Math.PI / 2;
   state.scene.add(tilesRenderer.group);
   state.tilesetRoot = tilesRenderer.group;
   state.tilesRenderer = tilesRenderer;
