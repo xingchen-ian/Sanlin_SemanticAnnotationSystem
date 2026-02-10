@@ -216,7 +216,7 @@ async function loadTileset(tilesetUrl) {
   // 先检查 URL 是否可访问，便于排查 404/CORS（失败时仍继续尝试加载）
   try {
     const res = await fetch(url, { method: 'HEAD' });
-    if (!res.ok) {
+    if (!res.ok && res.status !== 304) {
       throw new Error('tileset.json 返回 ' + res.status + '，请检查 URL 是否正确');
     }
   } catch (e) {
