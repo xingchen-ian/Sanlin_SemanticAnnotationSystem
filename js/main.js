@@ -224,7 +224,9 @@ async function loadTileset(tilesetUrl) {
     console.warn('[3D Tiles] HEAD 预检失败，继续尝试加载:', e?.message || e);
   }
 
-  const tilesRenderer = new TilesRenderer(url);
+  // 避免 304 导致部分环境拿不到响应体，强制带查询参数使首请求返回 200
+  const tilesetUrlWithCacheBust = url + (url.includes('?') ? '&' : '?') + '_=' + Date.now();
+  const tilesRenderer = new TilesRenderer(tilesetUrlWithCacheBust);
   tilesRenderer.setCamera(state.camera);
   tilesRenderer.setResolutionFromRenderer(state.camera, state.renderer);
 
