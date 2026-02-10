@@ -1510,15 +1510,18 @@ function getCanvasSize(canvas) {
 
 // ----- 将模型居中并调整相机 -----
 function frameModelInView(scene, model) {
+  model.updateMatrixWorld(true);
   const box = new THREE.Box3().setFromObject(model);
   const center = box.getCenter(new THREE.Vector3());
   const size = box.getSize(new THREE.Vector3());
   let maxDim = Math.max(size.x, size.y, size.z, 1);
   // 仅当包围盒几乎为空（如 3D Tiles 刚加载时）才拉远相机，否则普通小模型会变成一个小点
   if (maxDim < 5) maxDim = 500;
-  const dist = maxDim * 1.5;
+  // 小模型（如示例建筑 ~6 单位）用较近距离，避免看起来太远
+  const dist = maxDim >= 100 ? maxDim * 1.2 : Math.max(maxDim * 1.0, 4);
   state.camera.position.set(center.x + dist * 0.7, center.y + dist * 0.5, center.z + dist * 0.7);
   state.controls.target.copy(center);
+  if (state.controls.update) state.controls.update();
 }
 
 // ----- 初始化 -----
