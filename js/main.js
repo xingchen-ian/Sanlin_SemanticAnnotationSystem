@@ -1346,7 +1346,8 @@ async function loadModelFromList(model) {
   loaderEl?.classList.remove('hidden');
   try {
     if (model.url === 'builtin://default') {
-      createDefaultBuilding(state.scene);
+      const group = createDefaultBuilding(state.scene);
+      frameModelInView(state.scene, group);
     } else {
       await loadModel(model.url);
     }
@@ -1357,7 +1358,8 @@ async function loadModelFromList(model) {
   } catch (e) {
     console.error('loadModelFromList:', e);
     alert('加载模型失败: ' + (e.message || e));
-    createDefaultBuilding(state.scene);
+    const fallbackGroup = createDefaultBuilding(state.scene);
+    frameModelInView(state.scene, fallbackGroup);
     state.currentModelId = await ensureDefaultModel();
     if (state.currentModelId) await loadAnnotationsFromApi();
     subscribePusher(state.currentModelId);
@@ -1563,7 +1565,8 @@ async function init() {
   fill.position.set(-8, 8, -8);
   state.scene.add(fill);
 
-  createDefaultBuilding(state.scene);
+  const defaultGroup = createDefaultBuilding(state.scene);
+  frameModelInView(state.scene, defaultGroup);
   loaderEl.classList.add('hidden');
 
   await initAuth();
