@@ -207,17 +207,27 @@ function syncTilesetMeshes() {
 }
 
 // ----- 加载 3D Tiles（tileset.json 的完整 URL，使用 NASA 3d-tiles-renderer） -----
-function loadTileset(tilesetUrl) {
+async function loadTileset(tilesetUrl) {
   let url = tilesetUrl?.trim();
   if (!url) throw new Error('请输入 tileset.json 的 URL');
   if (url.startsWith('/') || url.startsWith('./')) {
     url = new URL(url, window.location.origin).href;
   }
+  // 先检查 URL 是否可访问，便于排查 404/CORS（失败时仍继续尝试加载）
+  try {
+    const res = await fetch(url, { method: 'HEAD' });
+    if (!res.ok) {
+      throw new Error('tileset.json 返回 ' + res.status + '，请检查 URL 是否正确');
+    }
+  } catch (e) {
+    if (e.message?.startsWith('tileset.json 返回')) throw e;
+    console.warn('[3D Tiles] HEAD 预检失败，继续尝试加载:', e?.message || e);
+  }
+
   const tilesRenderer = new TilesRenderer(url);
   tilesRenderer.setCamera(state.camera);
   tilesRenderer.setResolutionFromRenderer(state.camera, state.renderer);
 
-  // manager 也注册带 DRACO 的 GLTFLoader，供部分加载路径使用（主路径已通过全局 patch 注入）
   const dracoLoader = new DRACOLoader();
   dracoLoader.setDecoderPath(DRACO_PATH);
   const gltfLoader = new GLTFLoader(tilesRenderer.manager);
@@ -225,7 +235,6 @@ function loadTileset(tilesetUrl) {
   tilesRenderer.manager.addHandler(/\.(gltf|glb)$/gi, gltfLoader);
 
   tilesRenderer.group.traverse((o) => { o.userData.isLoadedModel = true; });
-  // 3D Tiles 常见为 Z-up（Cesium/GIS），Three.js 为 Y-up；绕 X 轴 -90° 使地面水平
   tilesRenderer.group.rotation.x = -Math.PI / 2;
   state.scene.add(tilesRenderer.group);
   state.tilesetRoot = tilesRenderer.group;
@@ -253,7 +262,6 @@ function loadTileset(tilesetUrl) {
     };
     tilesRenderer.addEventListener('load-root-tileset', onRootLoaded);
     tilesRenderer.addEventListener('error', onError);
-    // 若未触发 load-root-tileset（如 URL 错误），8 秒后 resolve 避免 loader 一直转
     timeoutId = setTimeout(() => {
       tilesRenderer.removeEventListener('load-root-tileset', onRootLoaded);
       tilesRenderer.removeEventListener('error', onError);
