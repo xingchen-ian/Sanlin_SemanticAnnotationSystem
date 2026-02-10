@@ -436,6 +436,10 @@ function updateSelectionRect(start, end, canvas) {
 function onPointerDown(event) {
   if (event.button === 2) {
     state.rightMouseDown = true;
+    const canvas = document.getElementById('canvas');
+    if (canvas) {
+      canvas.focus();
+    }
     return;
   }
   if (event.button !== 0) return;
@@ -1518,7 +1522,8 @@ async function init() {
   const modelList = await fetchModelList();
   renderModelList(modelList);
 
-  canvas.addEventListener('mousedown', onPointerDown);
+  canvas.tabIndex = -1;
+  canvas.addEventListener('mousedown', onPointerDown, true);
   canvas.addEventListener('click', onPointerClick);
   canvas.addEventListener('contextmenu', (e) => e.preventDefault());
   window.addEventListener('mousemove', onPointerMove);
