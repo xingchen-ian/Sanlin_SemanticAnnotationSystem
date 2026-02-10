@@ -9,6 +9,8 @@ import { DRACOLoader } from 'https://cdn.jsdelivr.net/npm/three@0.170.0/examples
 import { OBJLoader } from 'https://cdn.jsdelivr.net/npm/three@0.170.0/examples/jsm/loaders/OBJLoader.js';
 import { TilesRenderer } from '3d-tiles-renderer';
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
+
+const DRACO_PATH = 'https://cdn.jsdelivr.net/npm/three@0.170.0/examples/jsm/libs/draco/gltf/';
 import Pusher from 'https://esm.sh/pusher-js';
 
 // ----- 状态 -----
