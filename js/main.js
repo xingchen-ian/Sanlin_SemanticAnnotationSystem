@@ -1518,7 +1518,7 @@ function frameModelInView(scene, model) {
   // 仅当包围盒几乎为空（如 3D Tiles 刚加载时）才拉远相机，否则普通小模型会变成一个小点
   if (maxDim < 5) maxDim = 500;
   // 小模型（如示例建筑 ~6 单位）用较近距离，避免看起来太远
-  const dist = maxDim >= 100 ? maxDim * 1.2 : Math.max(maxDim * 1.0, 4);
+  const dist = maxDim >= 100 ? maxDim * 1.2 : Math.max(maxDim * 0.6, 3);
   state.camera.position.set(center.x + dist * 0.7, center.y + dist * 0.5, center.z + dist * 0.7);
   state.controls.target.copy(center);
   if (state.controls.update) state.controls.update();
