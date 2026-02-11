@@ -234,7 +234,8 @@ async function loadTileset(tilesetUrl) {
     const json = await res.json();
     const box = json?.root?.boundingVolume?.box;
     if (box && box.length >= 3) {
-      rootCenter = new THREE.Vector3(-box[0], -box[1], -box[2]);
+      // 中心 (box[0],box[1],box[2]) 经 rotation.x=-PI/2 后变为 (box[0],box[2],-box[1])，需用此来平移
+      rootCenter = new THREE.Vector3(-box[0], -box[2], box[1]);
     }
   } catch (e) {
     console.warn('[3D Tiles] 预解析 tileset 失败，将依赖 load-root-tileset 再定位:', e?.message || e);
@@ -264,8 +265,10 @@ async function loadTileset(tilesetUrl) {
       clearTimeout(timeoutId);
       tilesRenderer.removeEventListener('load-root-tileset', onRootLoaded);
       tilesRenderer.removeEventListener('error', onError);
-      if (!rootCenter && tilesRenderer.getBoundingSphere(sphere)) {
+      if (tilesRenderer.getBoundingSphere(sphere)) {
         tilesRenderer.group.position.copy(sphere.center).multiplyScalar(-1);
+      } else if (rootCenter) {
+        tilesRenderer.group.position.copy(rootCenter);
       }
       syncTilesetMeshes();
       frameModelInView(state.scene, tilesRenderer.group);
