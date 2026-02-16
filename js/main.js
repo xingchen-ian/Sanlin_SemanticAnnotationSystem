@@ -45,9 +45,9 @@ const state = {
   tilesRenderer: null,  // 3d-tiles-renderer 实例（每帧 update）
   tilesetRoot: null,    // 3D Tiles 根 Group，用于同步 mesh 列表
   tilesetPositionOffset: null,  // 使 tile 内容中心落在原点所需的 group.position（考虑 rotation），每帧强制应用
-  tilesetCorrectionX: 0,        // 绕 X 轴校正弧度，应用到 wrapper.rotation.x
-  tilesetCorrectionY: 0,        // 绕 Y 轴校正弧度，应用到 wrapper.rotation.y
-  tilesetTiltCorrection: 0,     // 绕 Z 轴校正弧度，应用到 wrapper.rotation.z（不修改库的 group 避免子节点被清空）
+  tilesetCorrectionX: (133 * Math.PI) / 180,   // 预设旋转校正（与 UI 默认一致）
+  tilesetCorrectionY: (-10 * Math.PI) / 180,
+  tilesetTiltCorrection: (130 * Math.PI) / 180,
   tilesetWrapper: null,         // 包裹 tilesRenderer.group 的外层 Group，用于施加三轴旋转校正
   tilesetErrorTarget: 2,        // LOD 屏幕空间误差目标（像素），值越小越远距离加载精细瓦片，可在 UI 调节
   tilesetUrl: null,             // 当前加载的 tileset 根 URL（不含 cache bust），用于检查倾斜
@@ -373,24 +373,19 @@ async function loadTileset(tilesetUrl) {
     console.warn('[3D Tiles] 预解析 tileset 失败，将依赖 load-root-tileset 再定位:', e?.message || e);
   }
 
-  // 若子 tileset 根节点含 transform 旋转，则自动设旋转校正为其逆，载入即调正
-  if (tilesetJson) {
-    const baseUrl = getBaseUrl(url);
-    const invRot = await getTilesetInverseRotationForCorrection(tilesetJson, baseUrl);
-    if (invRot) {
-      state.tilesetCorrectionX = invRot.x;
-      state.tilesetCorrectionY = invRot.y;
-      state.tilesetTiltCorrection = invRot.z;
-      const toDeg = (r) => (r * 180 / Math.PI).toFixed(2);
-      console.log('[3D Tiles] 已根据数据 transform 自动设置旋转校正: X=' + toDeg(invRot.x) + '° Y=' + toDeg(invRot.y) + '° Z=' + toDeg(invRot.z) + '°');
-      const xEl = document.getElementById('tileset-rot-x');
-      const yEl = document.getElementById('tileset-rot-y');
-      const zEl = document.getElementById('tileset-rot-z');
-      if (xEl) xEl.value = (invRot.x * 180 / Math.PI).toFixed(2);
-      if (yEl) yEl.value = (invRot.y * 180 / Math.PI).toFixed(2);
-      if (zEl) zEl.value = (invRot.z * 180 / Math.PI).toFixed(2);
-    }
-  }
+  // 预设旋转校正（度）：载入 3D Tiles 时自动应用，与图片中调好的数值一致
+  const PRESET_ROTATION_DEG = { x: 133, y: -10, z: 130 };
+  const toRad = (deg) => (deg * Math.PI) / 180;
+  state.tilesetCorrectionX = toRad(PRESET_ROTATION_DEG.x);
+  state.tilesetCorrectionY = toRad(PRESET_ROTATION_DEG.y);
+  state.tilesetTiltCorrection = toRad(PRESET_ROTATION_DEG.z);
+  const xEl = document.getElementById('tileset-rot-x');
+  const yEl = document.getElementById('tileset-rot-y');
+  const zEl = document.getElementById('tileset-rot-z');
+  if (xEl) xEl.value = String(PRESET_ROTATION_DEG.x);
+  if (yEl) yEl.value = String(PRESET_ROTATION_DEG.y);
+  if (zEl) zEl.value = String(PRESET_ROTATION_DEG.z);
+  console.log('[3D Tiles] 已应用预设旋转校正: X=' + PRESET_ROTATION_DEG.x + '° Y=' + PRESET_ROTATION_DEG.y + '° Z=' + PRESET_ROTATION_DEG.z + '°');
 
   const tilesRenderer = new TilesRenderer(tilesetUrlWithCacheBust);
   tilesRenderer.setCamera(state.camera);
