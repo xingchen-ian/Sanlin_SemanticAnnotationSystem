@@ -267,6 +267,46 @@ async function ensureTilesetUrlReachable(url) {
   return null;
 }
 
+// ----- 根据子 tileset 根节点的 transform 计算逆旋转，用于载入时自动调正 -----
+function getBaseUrl(urlStr) {
+  try {
+    const a = new URL(urlStr, window.location.origin);
+    const path = a.pathname.replace(/\/[^/]*$/, '/');
+    return a.origin + path;
+  } catch (_) { return ''; }
+}
+
+async function getTilesetInverseRotationForCorrection(rootJson, baseUrl) {
+  const root = rootJson?.root;
+  if (!root) return null;
+  const children = root.children || [];
+  const childTileset = children.find((c) => c.content?.uri && String(c.content.uri).toLowerCase().endsWith('tileset.json'));
+  if (!childTileset?.content?.uri) return null;
+  const childUrl = baseUrl + childTileset.content.uri;
+  try {
+    const res = await fetch(childUrl);
+    if (!res.ok) return null;
+    const cjson = await res.json();
+    const croot = cjson?.root;
+    if (!croot?.transform || !Array.isArray(croot.transform) || croot.transform.length < 16) return null;
+    const m = new THREE.Matrix4();
+    m.fromArray(croot.transform);
+    // 提取 3x3 旋转并取逆（旋转矩阵的逆 = 转置）；set 为行优先，行取 m 的列即得 R^T
+    const rot = new THREE.Matrix4();
+    rot.set(
+      m.elements[0], m.elements[4], m.elements[8], 0,
+      m.elements[1], m.elements[5], m.elements[9], 0,
+      m.elements[2], m.elements[6], m.elements[10], 0,
+      0, 0, 0, 1
+    );
+    const e = new THREE.Euler();
+    e.setFromRotationMatrix(rot);
+    return { x: e.x, y: e.y, z: e.z };
+  } catch (_) {
+    return null;
+  }
+}
+
 // ----- 加载 3D Tiles（tileset.json 的完整 URL，使用 NASA 3d-tiles-renderer） -----
 async function loadTileset(tilesetUrl) {
   let url = resolveTilesetUrl(tilesetUrl);
@@ -312,11 +352,12 @@ async function loadTileset(tilesetUrl) {
   // 先拉取并解析 tileset.json，提前把根节点中心算好，这样在 TilesRenderer 第一次 update 前就能设好 group.position，
   // 否则相机在几百单位而瓦片在数百万单位，视锥剔除会认为“不可见”从而不请求任何 .b3dm
   let rootCenter = null;
+  let tilesetJson = null;
   try {
     const res = await fetch(tilesetUrlWithCacheBust);
     if (!res.ok) throw new Error('tileset.json ' + res.status);
-    const json = await res.json();
-    const box = json?.root?.boundingVolume?.box;
+    tilesetJson = await res.json();
+    const box = tilesetJson?.root?.boundingVolume?.box;
     if (box && box.length >= 3) {
       // 中心 (box[0],box[1],box[2]) 经 rotation.x=-PI/2 后变为 (box[0],box[2],-box[1])，需用此来平移
       rootCenter = new THREE.Vector3(-box[0], -box[2], box[1]);
@@ -324,6 +365,25 @@ async function loadTileset(tilesetUrl) {
     }
   } catch (e) {
     console.warn('[3D Tiles] 预解析 tileset 失败，将依赖 load-root-tileset 再定位:', e?.message || e);
+  }
+
+  // 若子 tileset 根节点含 transform 旋转，则自动设旋转校正为其逆，载入即调正
+  if (tilesetJson) {
+    const baseUrl = getBaseUrl(url);
+    const invRot = await getTilesetInverseRotationForCorrection(tilesetJson, baseUrl);
+    if (invRot) {
+      state.tilesetCorrectionX = invRot.x;
+      state.tilesetCorrectionY = invRot.y;
+      state.tilesetTiltCorrection = invRot.z;
+      const toDeg = (r) => (r * 180 / Math.PI).toFixed(2);
+      console.log('[3D Tiles] 已根据数据 transform 自动设置旋转校正: X=' + toDeg(invRot.x) + '° Y=' + toDeg(invRot.y) + '° Z=' + toDeg(invRot.z) + '°');
+      const xEl = document.getElementById('tileset-rot-x');
+      const yEl = document.getElementById('tileset-rot-y');
+      const zEl = document.getElementById('tileset-rot-z');
+      if (xEl) xEl.value = (invRot.x * 180 / Math.PI).toFixed(2);
+      if (yEl) yEl.value = (invRot.y * 180 / Math.PI).toFixed(2);
+      if (zEl) zEl.value = (invRot.z * 180 / Math.PI).toFixed(2);
+    }
   }
 
   const tilesRenderer = new TilesRenderer(tilesetUrlWithCacheBust);
