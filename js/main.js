@@ -50,6 +50,9 @@ const state = {
   tilesetTiltCorrection: 0,     // 绕 Z 轴校正弧度，应用到 wrapper.rotation.z（不修改库的 group 避免子节点被清空）
   tilesetWrapper: null,         // 包裹 tilesRenderer.group 的外层 Group，用于施加三轴旋转校正
   tilesetErrorTarget: 2,        // LOD 屏幕空间误差目标（像素），值越小越远距离加载精细瓦片，可在 UI 调节
+  ambientLight: null,           // 环境光，供 UI 调节 intensity
+  dirLight: null,               // 主方向光
+  fillLight: null,              // 补光
 };
 
 const supabase = (() => {
@@ -1722,15 +1725,15 @@ async function init() {
   };
   state.controls = controls;
 
-  // 灯光强度调低，避免 3D Tiles / 模型过亮
-  const ambient = new THREE.AmbientLight(0xffffff, 0.5);   // 原 1.0
-  state.scene.add(ambient);
-  const dir = new THREE.DirectionalLight(0xffffff, 0.85);   // 原 1.2
-  dir.position.set(10, 15, 10);
-  state.scene.add(dir);
-  const fill = new THREE.DirectionalLight(0xffffff, 0.25); // 原 0.4
-  fill.position.set(-8, 8, -8);
-  state.scene.add(fill);
+  // 灯光（强度可由侧栏滑条调节）
+  state.ambientLight = new THREE.AmbientLight(0xffffff, 0.5);
+  state.scene.add(state.ambientLight);
+  state.dirLight = new THREE.DirectionalLight(0xffffff, 0.85);
+  state.dirLight.position.set(10, 15, 10);
+  state.scene.add(state.dirLight);
+  state.fillLight = new THREE.DirectionalLight(0xffffff, 0.25);
+  state.fillLight.position.set(-8, 8, -8);
+  state.scene.add(state.fillLight);
 
   const defaultGroup = createDefaultBuilding(state.scene);
   frameModelInView(state.scene, defaultGroup);
@@ -1867,6 +1870,27 @@ async function init() {
     };
     rangeEl?.addEventListener('input', () => applyLod(rangeEl.value));
     inputEl?.addEventListener('change', () => applyLod(inputEl.value));
+  })();
+
+  (function initLightingControls() {
+    const cfg = [
+      { id: 'light-exposure', valueId: 'light-exposure-value', min: 0.5, max: 2, step: 0.05, set: (v) => { if (state.renderer) state.renderer.toneMappingExposure = v; } },
+      { id: 'light-ambient', valueId: 'light-ambient-value', min: 0, max: 2, set: (v) => { if (state.ambientLight) state.ambientLight.intensity = v; } },
+      { id: 'light-dir', valueId: 'light-dir-value', min: 0, max: 2, set: (v) => { if (state.dirLight) state.dirLight.intensity = v; } },
+      { id: 'light-fill', valueId: 'light-fill-value', min: 0, max: 1, set: (v) => { if (state.fillLight) state.fillLight.intensity = v; } },
+    ];
+    cfg.forEach(({ id, valueId, set }) => {
+      const slider = document.getElementById(id);
+      const valueEl = document.getElementById(valueId);
+      if (!slider || !valueEl) return;
+      const update = () => {
+        const v = parseFloat(slider.value) || 0;
+        valueEl.textContent = v.toFixed(2);
+        set(v);
+      };
+      slider.addEventListener('input', update);
+      update();
+    });
   })();
 
   document.getElementById('btn-save').addEventListener('click', saveAnnotationsToApi);

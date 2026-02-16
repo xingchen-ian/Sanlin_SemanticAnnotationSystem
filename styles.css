@@ -248,6 +248,32 @@ body {
   margin-top: 2px;
 }
 
+#lighting-section h2 {
+  margin-bottom: 8px;
+}
+.lighting-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+.lighting-row label {
+  font-size: 12px;
+  color: #aaa;
+  flex-shrink: 0;
+  min-width: 72px;
+}
+.lighting-row input[type="range"] {
+  flex: 1;
+  min-width: 0;
+}
+.lighting-value {
+  font-size: 11px;
+  color: #888;
+  min-width: 36px;
+  text-align: right;
+}
+
 #model-list-section {
   margin-top: 12px;
   padding-top: 12px;

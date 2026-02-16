@@ -82,6 +82,30 @@
         </div>
       </section>
 
+      <section class="panel-section" id="lighting-section">
+        <h2>灯光调节</h2>
+        <div class="lighting-row">
+          <label for="light-exposure">渲染器曝光</label>
+          <input type="range" id="light-exposure" min="0.5" max="2" step="0.05" value="1" />
+          <span id="light-exposure-value" class="lighting-value">1.00</span>
+        </div>
+        <div class="lighting-row">
+          <label for="light-ambient">环境光</label>
+          <input type="range" id="light-ambient" min="0" max="2" step="0.05" value="0.5" />
+          <span id="light-ambient-value" class="lighting-value">0.50</span>
+        </div>
+        <div class="lighting-row">
+          <label for="light-dir">主方向光</label>
+          <input type="range" id="light-dir" min="0" max="2" step="0.05" value="0.85" />
+          <span id="light-dir-value" class="lighting-value">0.85</span>
+        </div>
+        <div class="lighting-row">
+          <label for="light-fill">补光</label>
+          <input type="range" id="light-fill" min="0" max="1" step="0.05" value="0.25" />
+          <span id="light-fill-value" class="lighting-value">0.25</span>
+        </div>
+      </section>
+
       <section class="panel-section">
         <h2>当前选择</h2>
         <div id="selection-info">未选择</div>
