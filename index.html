@@ -43,7 +43,10 @@
         <button id="btn-default-model">加载示例建筑</button>
         <div class="tileset-load">
           <input type="text" id="tileset-url-input" placeholder="/terra_b3dms/tileset.json 或 /public/terra_b3dms/tileset.json" class="tileset-url-input" />
-          <button id="btn-load-tileset">加载 3D Tiles</button>
+          <div class="tileset-actions">
+            <button id="btn-load-tileset">加载 3D Tiles</button>
+            <button type="button" id="btn-debug-tileset" title="在控制台输出 3D Tiles 加载状态">诊断</button>
+          </div>
         </div>
         <div id="model-list-section">
           <h3 class="model-list-title">我的模型</h3>

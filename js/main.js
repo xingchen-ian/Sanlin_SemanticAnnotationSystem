@@ -280,6 +280,7 @@ async function loadTileset(tilesetUrl) {
     if (box && box.length >= 3) {
       // 中心 (box[0],box[1],box[2]) 经 rotation.x=-PI/2 后变为 (box[0],box[2],-box[1])，需用此来平移
       rootCenter = new THREE.Vector3(-box[0], -box[2], box[1]);
+      console.log('[3D Tiles] 预解析 root 包围盒中心 → group.position:', rootCenter.x, rootCenter.y, rootCenter.z);
     }
   } catch (e) {
     console.warn('[3D Tiles] 预解析 tileset 失败，将依赖 load-root-tileset 再定位:', e?.message || e);
@@ -311,29 +312,76 @@ async function loadTileset(tilesetUrl) {
       tilesRenderer.removeEventListener('error', onError);
       if (tilesRenderer.getBoundingSphere(sphere)) {
         tilesRenderer.group.position.copy(sphere.center).multiplyScalar(-1);
+        console.log('[3D Tiles] load-root-tileset 已触发，boundingSphere 中心 → group.position:', tilesRenderer.group.position.x, tilesRenderer.group.position.y, tilesRenderer.group.position.z, '半径:', sphere.radius);
       } else if (rootCenter) {
         tilesRenderer.group.position.copy(rootCenter);
+        console.log('[3D Tiles] load-root-tileset 已触发，使用预解析 rootCenter');
       }
       syncTilesetMeshes();
+      const meshCount = state.meshes.filter((m) => m.mesh.parent != null).length;
+      console.log('[3D Tiles] 当前可见 mesh 数:', meshCount);
       frameModelInView(state.scene, tilesRenderer.group);
+      const box = new THREE.Box3().setFromObject(tilesRenderer.group);
+      const size = box.getSize(new THREE.Vector3());
+      console.log('[3D Tiles] 当前 group 包围盒 size:', size.x?.toFixed(1), size.y?.toFixed(1), size.z?.toFixed(1), '相机距离:', state.camera.position.distanceTo(state.controls.target).toFixed(1));
       resolve(tilesRenderer.group);
     };
     const onError = (e) => {
       clearTimeout(timeoutId);
       tilesRenderer.removeEventListener('load-root-tileset', onRootLoaded);
       tilesRenderer.removeEventListener('error', onError);
+      console.error('[3D Tiles] error 事件:', e?.message || e);
       reject(new Error(e?.message || '3D Tiles 加载失败'));
     };
     tilesRenderer.addEventListener('load-root-tileset', onRootLoaded);
     tilesRenderer.addEventListener('error', onError);
+    console.log('[3D Tiles] 开始加载，URL:', tilesetUrlWithCacheBust.split('?')[0]);
     timeoutId = setTimeout(() => {
       tilesRenderer.removeEventListener('load-root-tileset', onRootLoaded);
       tilesRenderer.removeEventListener('error', onError);
+      console.warn('[3D Tiles] 8 秒超时，load-root-tileset 未触发，使用当前 group 状态尝试框选视图');
       syncTilesetMeshes();
       frameModelInView(state.scene, tilesRenderer.group);
       resolve(tilesRenderer.group);
     }, 8000);
   });
+}
+
+// ----- 3D Tiles 诊断：在控制台执行 debugTileset() 查看当前加载状态 -----
+function debugTileset() {
+  const report = [];
+  report.push('=== 3D Tiles 诊断 ===');
+  if (!state.tilesRenderer) {
+    report.push('未加载 3D Tiles（state.tilesRenderer 为空）');
+    console.log(report.join('\n'));
+    return report;
+  }
+  const tr = state.tilesRenderer;
+  const group = tr.group;
+  report.push('TilesRenderer: 已创建');
+  report.push('group.position: ' + group.position.x.toFixed(2) + ', ' + group.position.y.toFixed(2) + ', ' + group.position.z.toFixed(2));
+  report.push('group.children 数量: ' + group.children.length);
+  const sphere = new THREE.Sphere();
+  if (tr.getBoundingSphere(sphere)) {
+    report.push('boundingSphere 中心: ' + sphere.center.x.toFixed(2) + ', ' + sphere.center.y.toFixed(2) + ', ' + sphere.center.z.toFixed(2) + ' 半径: ' + sphere.radius.toFixed(2));
+  } else {
+    report.push('boundingSphere: 无法获取');
+  }
+  report.push('相机 position: ' + state.camera.position.x.toFixed(2) + ', ' + state.camera.position.y.toFixed(2) + ', ' + state.camera.position.z.toFixed(2));
+  report.push('相机 target: ' + state.controls.target.x.toFixed(2) + ', ' + state.controls.target.y.toFixed(2) + ', ' + state.controls.target.z.toFixed(2));
+  const dist = state.camera.position.distanceTo(state.controls.target);
+  report.push('相机到 target 距离: ' + dist.toFixed(2));
+  report.push('相机 near/far: ' + state.camera.near + ' / ' + state.camera.far);
+  let meshCount = 0;
+  group.traverse((o) => { if (o.isMesh && o.geometry) meshCount++; });
+  report.push('group 内 mesh 数量: ' + meshCount);
+  report.push('state.meshes 中在场景内的数量: ' + state.meshes.filter((m) => m.mesh.parent != null).length);
+  const box = new THREE.Box3().setFromObject(group);
+  const size = box.getSize(new THREE.Vector3());
+  const isEmpty = size.x === 0 && size.y === 0 && size.z === 0;
+  report.push('group 包围盒 size: ' + size.x.toFixed(2) + ', ' + size.y.toFixed(2) + ', ' + size.z.toFixed(2) + (isEmpty ? ' (可能尚未加载几何体)' : ''));
+  console.log(report.join('\n'));
+  return report;
 }
 
 // ----- 获取当前在场景中的 mesh 列表（3D Tiles 会动态加载/卸载，只对在场景中的做射线检测） -----
@@ -1715,6 +1763,11 @@ async function init() {
     }
   });
 
+  document.getElementById('btn-debug-tileset').addEventListener('click', () => {
+    const report = debugTileset();
+    setPersistStatus(report.length ? '诊断已输出到控制台 (F12 → Console)' : '请先加载 3D Tiles 再诊断', !state.tilesRenderer);
+  });
+
   document.getElementById('btn-save').addEventListener('click', saveAnnotationsToApi);
   document.getElementById('btn-load').addEventListener('click', loadAnnotationsFromApi);
   document.getElementById('btn-export').addEventListener('click', exportAnnotations);
@@ -1759,6 +1812,9 @@ async function init() {
     state.renderer.setSize(s.width, s.height);
     updateCalloutOverlay();
   });
+
+  // 控制台可执行 debugTileset() 检查 3D Tiles 加载状态
+  window.debugTileset = debugTileset;
 
   updateSelectionUI();
   updateAnnotationList();

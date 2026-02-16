@@ -175,8 +175,20 @@ body {
   margin-bottom: 6px;
   padding: 6px 8px;
 }
+.tileset-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 4px;
+}
+.tileset-actions #btn-load-tileset {
+  flex: 1;
+}
+.tileset-actions #btn-debug-tileset {
+  flex-shrink: 0;
+  padding: 6px 10px;
+}
 .tileset-load button {
-  width: 100%;
+  min-width: 0;
 }
 
 #model-list-section {
