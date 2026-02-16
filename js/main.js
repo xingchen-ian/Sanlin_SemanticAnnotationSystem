@@ -44,6 +44,7 @@ const state = {
   session: null,         // Supabase Auth session
   tilesRenderer: null,  // 3d-tiles-renderer 实例（每帧 update）
   tilesetRoot: null,    // 3D Tiles 根 Group，用于同步 mesh 列表
+  tilesetPositionOffset: null,  // 使 tile 内容中心落在原点所需的 group.position（考虑 rotation），每帧强制应用
 };
 
 const supabase = (() => {
@@ -116,6 +117,7 @@ function extractMeshesFromObject(obj, parentMatrix = new THREE.Matrix4()) {
 function clearModel(scene) {
   state.faceOverlayMeshes.clear();
   state.tilesetRoot = null;
+  state.tilesetPositionOffset = null;
   state._tilesRuntimeErrorLogged = false;
   const toRemove = scene.children.filter(c =>
     c.name === 'default_building' || c.userData?.isLoadedModel
@@ -319,7 +321,10 @@ async function loadTileset(tilesetUrl) {
 
   tilesRenderer.group.traverse((o) => { o.userData.isLoadedModel = true; });
   tilesRenderer.group.rotation.x = -Math.PI / 2;
-  if (rootCenter) tilesRenderer.group.position.copy(rootCenter);
+  if (rootCenter) {
+    state.tilesetPositionOffset = rootCenter.clone();
+    tilesRenderer.group.position.copy(rootCenter);
+  }
   state.scene.add(tilesRenderer.group);
   state.tilesetRoot = tilesRenderer.group;
   state.tilesRenderer = tilesRenderer;
@@ -331,14 +336,16 @@ async function loadTileset(tilesetUrl) {
       clearTimeout(timeoutId);
       tilesRenderer.removeEventListener('load-root-tileset', onRootLoaded);
       tilesRenderer.removeEventListener('error', onError);
-      // group 有 rotation.x = -PI/2，世界空间中心 = position + R*sphere.center，要使中心在原点需 position = -R*sphere.center
-      // R*(x,y,z) = (x, z, -y)，故 position = (-sphere.center.x, -sphere.center.z, sphere.center.y)
+      // 关键：group 有 rotation.x = -PI/2，世界空间内容中心 = position + R*sphere.center。
+      // 要使内容中心在原点(0,0,0)，需 position = -R*sphere.center；R*(x,y,z)=(x,z,-y) => position = (-c.x, -c.z, c.y)
       if (tilesRenderer.getBoundingSphere(sphere)) {
         const c = sphere.center;
-        tilesRenderer.group.position.set(-c.x, -c.z, c.y);
-        console.log('[3D Tiles] load-root-tileset 已触发，boundingSphere → group.position (已考虑 rotation):', tilesRenderer.group.position.x, tilesRenderer.group.position.y, tilesRenderer.group.position.z, '半径:', sphere.radius);
+        state.tilesetPositionOffset = new THREE.Vector3(-c.x, -c.z, c.y);
+        tilesRenderer.group.position.copy(state.tilesetPositionOffset);
+        console.log('[3D Tiles] load-root-tileset 已触发，内容中心将落在原点，group.position:', state.tilesetPositionOffset.x, state.tilesetPositionOffset.y, state.tilesetPositionOffset.z, '半径:', sphere.radius);
       } else if (rootCenter) {
-        tilesRenderer.group.position.copy(rootCenter);
+        state.tilesetPositionOffset = rootCenter.clone();
+        tilesRenderer.group.position.copy(state.tilesetPositionOffset);
         console.log('[3D Tiles] load-root-tileset 已触发，使用预解析 rootCenter');
       }
       // 3D Tiles 包围球半径可能数百/数千，避免被 near/far 裁掉
@@ -1880,6 +1887,10 @@ async function init() {
       state.camera.updateMatrixWorld(true);
       state.tilesRenderer.setResolutionFromRenderer(state.camera, state.renderer);
       state.tilesRenderer.update();
+      // 每帧强制应用偏移，使 tile 内容中心在原点，避免被库在 update 中改回大坐标导致相机看不到
+      if (state.tilesetPositionOffset) {
+        state.tilesRenderer.group.position.copy(state.tilesetPositionOffset);
+      }
       syncTilesetMeshes();
     }
     state.renderer.render(state.scene, state.camera);
