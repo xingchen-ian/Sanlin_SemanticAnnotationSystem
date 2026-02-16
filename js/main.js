@@ -269,6 +269,26 @@ async function loadTileset(tilesetUrl) {
   }
 
   const tilesetUrlWithCacheBust = url + (url.includes('?') ? '&' : '?') + '_=' + Date.now();
+
+  // 拦截 fetch 一次，记录 3D Tiles 相关请求失败（便于排查子 tile 404）
+  if (!window._tilesFetchWrapped) {
+    window._tilesFetchWrapped = true;
+    const nativeFetch = window.fetch;
+    const isTileRelated = (s) => /tileset|\.b3dm|terra_b3dms/i.test(s) || /BlockR[A-Z0-9_]+\.(json|b3dm)/i.test(s);
+    window.fetch = function (input, init) {
+      const urlStr = typeof input === 'string' ? input : (input && input.url) || '';
+      return nativeFetch.apply(this, arguments).then((res) => {
+        if (isTileRelated(urlStr) && !res.ok && res.status !== 304) {
+          console.warn('[3D Tiles] 请求失败', res.status, urlStr);
+        }
+        return res;
+      }, (err) => {
+        if (isTileRelated(urlStr)) console.warn('[3D Tiles] 请求异常', urlStr, err?.message || err);
+        throw err;
+      });
+    };
+  }
+
   // 先拉取并解析 tileset.json，提前把根节点中心算好，这样在 TilesRenderer 第一次 update 前就能设好 group.position，
   // 否则相机在几百单位而瓦片在数百万单位，视锥剔除会认为“不可见”从而不请求任何 .b3dm
   let rootCenter = null;
@@ -295,6 +315,7 @@ async function loadTileset(tilesetUrl) {
   const gltfLoader = new GLTFLoader(tilesRenderer.manager);
   gltfLoader.setDRACOLoader(dracoLoader);
   tilesRenderer.manager.addHandler(/\.(gltf|glb)$/gi, gltfLoader);
+  tilesRenderer.manager.onError = (url) => console.warn('[3D Tiles] manager 加载失败:', url);
 
   tilesRenderer.group.traverse((o) => { o.userData.isLoadedModel = true; });
   tilesRenderer.group.rotation.x = -Math.PI / 2;
@@ -316,6 +337,12 @@ async function loadTileset(tilesetUrl) {
       } else if (rootCenter) {
         tilesRenderer.group.position.copy(rootCenter);
         console.log('[3D Tiles] load-root-tileset 已触发，使用预解析 rootCenter');
+      }
+      // 3D Tiles 包围球半径可能数百/数千，避免被 near/far 裁掉
+      if (state.camera.far < 100000) {
+        state.camera.far = 100000;
+        state.camera.updateProjectionMatrix();
+        console.log('[3D Tiles] 已设置相机 far = 100000');
       }
       syncTilesetMeshes();
       const meshCount = state.meshes.filter((m) => m.mesh.parent != null).length;
@@ -340,6 +367,10 @@ async function loadTileset(tilesetUrl) {
       tilesRenderer.removeEventListener('load-root-tileset', onRootLoaded);
       tilesRenderer.removeEventListener('error', onError);
       console.warn('[3D Tiles] 8 秒超时，load-root-tileset 未触发，使用当前 group 状态尝试框选视图');
+      if (state.camera.far < 100000) {
+        state.camera.far = 100000;
+        state.camera.updateProjectionMatrix();
+      }
       syncTilesetMeshes();
       frameModelInView(state.scene, tilesRenderer.group);
       resolve(tilesRenderer.group);
@@ -380,6 +411,9 @@ function debugTileset() {
   const size = box.getSize(new THREE.Vector3());
   const isEmpty = size.x === 0 && size.y === 0 && size.z === 0;
   report.push('group 包围盒 size: ' + size.x.toFixed(2) + ', ' + size.y.toFixed(2) + ', ' + size.z.toFixed(2) + (isEmpty ? ' (可能尚未加载几何体)' : ''));
+  if (isEmpty || meshCount === 0) {
+    report.push('→ 若一直为 0：请查看上方是否有 [3D Tiles] 请求失败/请求异常，或 Network 面板中 tileset.json / .b3dm 是否 404');
+  }
   console.log(report.join('\n'));
   return report;
 }
