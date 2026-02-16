@@ -331,9 +331,12 @@ async function loadTileset(tilesetUrl) {
       clearTimeout(timeoutId);
       tilesRenderer.removeEventListener('load-root-tileset', onRootLoaded);
       tilesRenderer.removeEventListener('error', onError);
+      // group 有 rotation.x = -PI/2，世界空间中心 = position + R*sphere.center，要使中心在原点需 position = -R*sphere.center
+      // R*(x,y,z) = (x, z, -y)，故 position = (-sphere.center.x, -sphere.center.z, sphere.center.y)
       if (tilesRenderer.getBoundingSphere(sphere)) {
-        tilesRenderer.group.position.copy(sphere.center).multiplyScalar(-1);
-        console.log('[3D Tiles] load-root-tileset 已触发，boundingSphere 中心 → group.position:', tilesRenderer.group.position.x, tilesRenderer.group.position.y, tilesRenderer.group.position.z, '半径:', sphere.radius);
+        const c = sphere.center;
+        tilesRenderer.group.position.set(-c.x, -c.z, c.y);
+        console.log('[3D Tiles] load-root-tileset 已触发，boundingSphere → group.position (已考虑 rotation):', tilesRenderer.group.position.x, tilesRenderer.group.position.y, tilesRenderer.group.position.z, '半径:', sphere.radius);
       } else if (rootCenter) {
         tilesRenderer.group.position.copy(rootCenter);
         console.log('[3D Tiles] load-root-tileset 已触发，使用预解析 rootCenter');
@@ -1875,6 +1878,7 @@ async function init() {
     }
     if (state.tilesRenderer) {
       state.camera.updateMatrixWorld(true);
+      state.tilesRenderer.setResolutionFromRenderer(state.camera, state.renderer);
       state.tilesRenderer.update();
       syncTilesetMeshes();
     }
