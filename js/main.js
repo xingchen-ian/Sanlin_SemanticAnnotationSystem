@@ -291,16 +291,22 @@ async function getTilesetInverseRotationForCorrection(rootJson, baseUrl) {
     if (!croot?.transform || !Array.isArray(croot.transform) || croot.transform.length < 16) return null;
     const m = new THREE.Matrix4();
     m.fromArray(croot.transform);
-    // 提取 3x3 旋转并取逆（旋转矩阵的逆 = 转置）；set 为行优先，行取 m 的列即得 R^T
-    const rot = new THREE.Matrix4();
-    rot.set(
+    // R_tile 的逆（旋转矩阵的逆 = 转置）
+    const R_tileInv = new THREE.Matrix4();
+    R_tileInv.set(
       m.elements[0], m.elements[4], m.elements[8], 0,
       m.elements[1], m.elements[5], m.elements[9], 0,
       m.elements[2], m.elements[6], m.elements[10], 0,
       0, 0, 0, 1
     );
+    // 库的 group 有 rotation.x = -90°（Z-up 转 Y-up），世界空间为 R_wrapper * R_group * R_tile；
+    // 要抵消 tile 旋转且保持直立，需 R_wrapper * R_group * R_tile = R_group => R_wrapper = R_group * R_tileInv * R_groupInv
+    const R_group = new THREE.Matrix4().makeRotationX(-Math.PI / 2);
+    const R_groupInv = new THREE.Matrix4().makeRotationX(Math.PI / 2);
+    const R_wrapper = new THREE.Matrix4();
+    R_wrapper.copy(R_group).multiply(R_tileInv).multiply(R_groupInv);
     const e = new THREE.Euler();
-    e.setFromRotationMatrix(rot);
+    e.setFromRotationMatrix(R_wrapper);
     return { x: e.x, y: e.y, z: e.z };
   } catch (_) {
     return null;
