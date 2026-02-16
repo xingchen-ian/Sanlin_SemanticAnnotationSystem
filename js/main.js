@@ -45,7 +45,8 @@ const state = {
   tilesRenderer: null,  // 3d-tiles-renderer 实例（每帧 update）
   tilesetRoot: null,    // 3D Tiles 根 Group，用于同步 mesh 列表
   tilesetPositionOffset: null,  // 使 tile 内容中心落在原点所需的 group.position（考虑 rotation），每帧强制应用
-  tilesetTiltCorrection: 0,     // 倾斜校正弧度，绕 Z 轴，每帧应用到 group.rotation.z
+  tilesetTiltCorrection: 0,     // 倾斜校正弧度，绕 Z 轴，应用到外层 wrapper.rotation.z（不修改库的 group 避免子节点被清空）
+  tilesetWrapper: null,         // 包裹 tilesRenderer.group 的外层 Group，仅用于施加 rotation.z
 };
 
 const supabase = (() => {
@@ -120,11 +121,16 @@ function clearModel(scene) {
   state.tilesetRoot = null;
   state.tilesetPositionOffset = null;
   state.tilesetTiltCorrection = 0;
+  state.tilesetWrapper = null;
   state._tilesRuntimeErrorLogged = false;
   const toRemove = scene.children.filter(c =>
     c.name === 'default_building' || c.userData?.isLoadedModel
   );
   toRemove.forEach(c => scene.remove(c));
+  if (state.tilesetWrapper) {
+    scene.remove(state.tilesetWrapper);
+    state.tilesetWrapper = null;
+  }
   if (state.tilesRenderer) {
     state.tilesRenderer.dispose();
     state.tilesRenderer = null;
@@ -327,7 +333,11 @@ async function loadTileset(tilesetUrl) {
     state.tilesetPositionOffset = rootCenter.clone();
     tilesRenderer.group.position.copy(rootCenter);
   }
-  state.scene.add(tilesRenderer.group);
+  const wrapper = new THREE.Group();
+  wrapper.userData.isLoadedModel = true;
+  wrapper.add(tilesRenderer.group);
+  state.scene.add(wrapper);
+  state.tilesetWrapper = wrapper;
   state.tilesetRoot = tilesRenderer.group;
   state.tilesRenderer = tilesRenderer;
 
@@ -404,8 +414,8 @@ function debugTileset() {
   report.push('TilesRenderer: 已创建');
   report.push('group.position: ' + group.position.x.toFixed(2) + ', ' + group.position.y.toFixed(2) + ', ' + group.position.z.toFixed(2));
   const rotDeg = (r) => (r * 180 / Math.PI).toFixed(2) + '°';
-  report.push('group.rotation (度): x=' + rotDeg(group.rotation.x) + ', y=' + rotDeg(group.rotation.y) + ', z=' + rotDeg(group.rotation.z) + ' （z 为倾斜校正）');
-  report.push('当前倾斜校正: ' + rotDeg(state.tilesetTiltCorrection));
+  report.push('group.rotation (度): x=' + rotDeg(group.rotation.x) + ', y=' + rotDeg(group.rotation.y) + ', z=' + rotDeg(group.rotation.z));
+  report.push('当前倾斜校正: ' + rotDeg(state.tilesetTiltCorrection) + (state.tilesetWrapper ? '（应用在外层 wrapper）' : ''));
   report.push('group.children 数量: ' + group.children.length);
   const sphere = new THREE.Sphere();
   if (tr.getBoundingSphere(sphere)) {
@@ -1822,7 +1832,6 @@ async function init() {
     const deg = parseFloat(input?.value) || 0;
     state.tilesetTiltCorrection = (deg * Math.PI) / 180;
     if (state.tilesRenderer) {
-      state.tilesRenderer.group.rotation.z = state.tilesetTiltCorrection;
       setPersistStatus('倾斜校正已应用: ' + deg.toFixed(2) + '°');
     } else {
       setPersistStatus('请先加载 3D Tiles 再应用倾斜校正', true);
@@ -1904,13 +1913,14 @@ async function init() {
       state.camera.updateMatrixWorld(true);
       state.tilesRenderer.setResolutionFromRenderer(state.camera, state.renderer);
       state.tilesRenderer.update();
-      // 每帧强制应用偏移与旋转，使 tile 内容中心在原点且可校正倾斜
+      // 每帧强制应用偏移；倾斜校正放在外层 wrapper 上，避免改库的 group.rotation 导致子节点被清空
       if (state.tilesetPositionOffset) {
         state.tilesRenderer.group.position.copy(state.tilesetPositionOffset);
       }
       state.tilesRenderer.group.rotation.x = -Math.PI / 2;
       state.tilesRenderer.group.rotation.y = 0;
-      state.tilesRenderer.group.rotation.z = state.tilesetTiltCorrection;
+      state.tilesRenderer.group.rotation.z = 0;
+      if (state.tilesetWrapper) state.tilesetWrapper.rotation.z = state.tilesetTiltCorrection;
       syncTilesetMeshes();
     }
     state.renderer.render(state.scene, state.camera);
