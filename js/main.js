@@ -49,6 +49,7 @@ const state = {
   tilesetCorrectionY: 0,        // 绕 Y 轴校正弧度，应用到 wrapper.rotation.y
   tilesetTiltCorrection: 0,     // 绕 Z 轴校正弧度，应用到 wrapper.rotation.z（不修改库的 group 避免子节点被清空）
   tilesetWrapper: null,         // 包裹 tilesRenderer.group 的外层 Group，用于施加三轴旋转校正
+  tilesetErrorTarget: 2,        // LOD 屏幕空间误差目标（像素），值越小越远距离加载精细瓦片，可在 UI 调节
 };
 
 const supabase = (() => {
@@ -324,8 +325,8 @@ async function loadTileset(tilesetUrl) {
   tilesRenderer.setCamera(state.camera);
   tilesRenderer.setResolutionFromRenderer(state.camera, state.renderer);
 
-  // LOD 与加载速度：errorTarget 越小越早加载精细瓦片（距离更远）；队列并发与每帧处理数提高以加快加载
-  tilesRenderer.errorTarget = 2;           // 默认 6，减小后更远距离即加载高细节（屏幕空间误差目标，像素）
+  // LOD 与加载速度：errorTarget 由 state.tilesetErrorTarget（可 UI 调节）决定；队列并发与每帧处理数提高以加快加载
+  tilesRenderer.errorTarget = state.tilesetErrorTarget;
   tilesRenderer.maxProcessedTiles = 450;    // 默认 250，每帧多处理一些瓦片，减少加载等待
   if (tilesRenderer.downloadQueue) tilesRenderer.downloadQueue.maxJobs = 40;   // 默认 25，提高下载并发
   if (tilesRenderer.parseQueue) tilesRenderer.parseQueue.maxJobs = 12;          // 默认 5，提高解析并发
@@ -1852,6 +1853,20 @@ async function init() {
       setPersistStatus('请先加载 3D Tiles 再应用旋转校正', true);
     }
   });
+
+  (function initLodControl() {
+    const rangeEl = document.getElementById('tileset-lod-range');
+    const inputEl = document.getElementById('tileset-lod-input');
+    const applyLod = (value) => {
+      const v = Math.max(0.5, Math.min(20, parseFloat(value) || 2));
+      state.tilesetErrorTarget = v;
+      if (rangeEl) rangeEl.value = String(v);
+      if (inputEl) inputEl.value = String(v);
+      if (state.tilesRenderer) state.tilesRenderer.errorTarget = v;
+    };
+    rangeEl?.addEventListener('input', () => applyLod(rangeEl.value));
+    inputEl?.addEventListener('change', () => applyLod(inputEl.value));
+  })();
 
   document.getElementById('btn-save').addEventListener('click', saveAnnotationsToApi);
   document.getElementById('btn-load').addEventListener('click', loadAnnotationsFromApi);
