@@ -50,6 +50,7 @@ const state = {
   tilesetTiltCorrection: (130 * Math.PI) / 180,
   tilesetWrapper: null,         // 包裹 tilesRenderer.group 的外层 Group，用于施加三轴旋转校正
   tilesetErrorTarget: 2,        // LOD 屏幕空间误差目标（像素），值越小越远距离加载精细瓦片，可在 UI 调节
+  selectionHighLOD: false,     // 为面选择强制使用最高精度 LOD（errorTarget 临时调小），便于在精细几何上选面标注
   tilesetUrl: null,             // 当前加载的 tileset 根 URL（不含 cache bust），用于检查倾斜
   ambientLight: null,           // 环境光，供 UI 调节 intensity
   dirLight: null,               // 主方向光
@@ -2076,6 +2077,14 @@ async function init() {
     document.getElementById('hint').textContent = '面模式：左键选择面 · Alt+左键拖拽框选 · 右键旋转';
   });
 
+  const chkHighLod = document.getElementById('chk-selection-high-lod');
+  if (chkHighLod) {
+    chkHighLod.checked = state.selectionHighLOD;
+    chkHighLod.addEventListener('change', () => {
+      state.selectionHighLOD = chkHighLod.checked;
+    });
+  }
+
   window.addEventListener('resize', () => {
     const c = document.getElementById('canvas');
     const s = getCanvasSize(c);
@@ -2115,6 +2124,8 @@ async function init() {
     if (state.tilesRenderer) {
       state.camera.updateMatrixWorld(true);
       state.tilesRenderer.setResolutionFromRenderer(state.camera, state.renderer);
+      // 高精度选择时强制加载更精细 LOD，使面选择落在最高精度几何上
+      state.tilesRenderer.errorTarget = state.selectionHighLOD ? 0.5 : state.tilesetErrorTarget;
       state.tilesRenderer.update();
       // 每帧强制应用偏移；倾斜校正放在外层 wrapper 上，避免改库的 group.rotation 导致子节点被清空
       if (state.tilesetPositionOffset) {
