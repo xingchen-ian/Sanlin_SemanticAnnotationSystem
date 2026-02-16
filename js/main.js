@@ -45,8 +45,10 @@ const state = {
   tilesRenderer: null,  // 3d-tiles-renderer 实例（每帧 update）
   tilesetRoot: null,    // 3D Tiles 根 Group，用于同步 mesh 列表
   tilesetPositionOffset: null,  // 使 tile 内容中心落在原点所需的 group.position（考虑 rotation），每帧强制应用
-  tilesetTiltCorrection: 0,     // 倾斜校正弧度，绕 Z 轴，应用到外层 wrapper.rotation.z（不修改库的 group 避免子节点被清空）
-  tilesetWrapper: null,         // 包裹 tilesRenderer.group 的外层 Group，仅用于施加 rotation.z
+  tilesetCorrectionX: 0,        // 绕 X 轴校正弧度，应用到 wrapper.rotation.x
+  tilesetCorrectionY: 0,        // 绕 Y 轴校正弧度，应用到 wrapper.rotation.y
+  tilesetTiltCorrection: 0,     // 绕 Z 轴校正弧度，应用到 wrapper.rotation.z（不修改库的 group 避免子节点被清空）
+  tilesetWrapper: null,         // 包裹 tilesRenderer.group 的外层 Group，用于施加三轴旋转校正
 };
 
 const supabase = (() => {
@@ -120,6 +122,8 @@ function clearModel(scene) {
   state.faceOverlayMeshes.clear();
   state.tilesetRoot = null;
   state.tilesetPositionOffset = null;
+  state.tilesetCorrectionX = 0;
+  state.tilesetCorrectionY = 0;
   state.tilesetTiltCorrection = 0;
   state.tilesetWrapper = null;
   state._tilesRuntimeErrorLogged = false;
@@ -415,7 +419,7 @@ function debugTileset() {
   report.push('group.position: ' + group.position.x.toFixed(2) + ', ' + group.position.y.toFixed(2) + ', ' + group.position.z.toFixed(2));
   const rotDeg = (r) => (r * 180 / Math.PI).toFixed(2) + '°';
   report.push('group.rotation (度): x=' + rotDeg(group.rotation.x) + ', y=' + rotDeg(group.rotation.y) + ', z=' + rotDeg(group.rotation.z));
-  report.push('当前倾斜校正: ' + rotDeg(state.tilesetTiltCorrection) + (state.tilesetWrapper ? '（应用在外层 wrapper）' : ''));
+  report.push('旋转校正 (wrapper): X=' + rotDeg(state.tilesetCorrectionX) + ', Y=' + rotDeg(state.tilesetCorrectionY) + ', Z=' + rotDeg(state.tilesetTiltCorrection) + (state.tilesetWrapper ? '（应用在外层 wrapper）' : ''));
   report.push('group.children 数量: ' + group.children.length);
   const sphere = new THREE.Sphere();
   if (tr.getBoundingSphere(sphere)) {
@@ -1828,13 +1832,17 @@ async function init() {
   });
 
   document.getElementById('btn-apply-tilt').addEventListener('click', () => {
-    const input = document.getElementById('tileset-tilt-input');
-    const deg = parseFloat(input?.value) || 0;
-    state.tilesetTiltCorrection = (deg * Math.PI) / 180;
+    const toRad = (v) => (parseFloat(v) || 0) * Math.PI / 180;
+    const degX = parseFloat(document.getElementById('tileset-rot-x')?.value) || 0;
+    const degY = parseFloat(document.getElementById('tileset-rot-y')?.value) || 0;
+    const degZ = parseFloat(document.getElementById('tileset-rot-z')?.value) || 0;
+    state.tilesetCorrectionX = toRad(degX);
+    state.tilesetCorrectionY = toRad(degY);
+    state.tilesetTiltCorrection = toRad(degZ);
     if (state.tilesRenderer) {
-      setPersistStatus('倾斜校正已应用: ' + deg.toFixed(2) + '°');
+      setPersistStatus('旋转校正已应用: X=' + degX.toFixed(1) + '° Y=' + degY.toFixed(1) + '° Z=' + degZ.toFixed(1) + '°');
     } else {
-      setPersistStatus('请先加载 3D Tiles 再应用倾斜校正', true);
+      setPersistStatus('请先加载 3D Tiles 再应用旋转校正', true);
     }
   });
 
@@ -1920,7 +1928,11 @@ async function init() {
       state.tilesRenderer.group.rotation.x = -Math.PI / 2;
       state.tilesRenderer.group.rotation.y = 0;
       state.tilesRenderer.group.rotation.z = 0;
-      if (state.tilesetWrapper) state.tilesetWrapper.rotation.z = state.tilesetTiltCorrection;
+      if (state.tilesetWrapper) {
+        state.tilesetWrapper.rotation.x = state.tilesetCorrectionX;
+        state.tilesetWrapper.rotation.y = state.tilesetCorrectionY;
+        state.tilesetWrapper.rotation.z = state.tilesetTiltCorrection;
+      }
       syncTilesetMeshes();
     }
     state.renderer.render(state.scene, state.camera);

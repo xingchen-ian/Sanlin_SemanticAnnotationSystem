@@ -190,24 +190,33 @@ body {
 .tileset-load button {
   min-width: 0;
 }
-.tileset-tilt {
+.tileset-rotation {
+  margin-top: 8px;
+}
+.tileset-rotation-title {
+  font-size: 12px;
+  color: #aaa;
+  display: block;
+  margin-bottom: 4px;
+}
+.tileset-rotation-inputs {
   display: flex;
   align-items: center;
   gap: 6px;
-  margin-top: 8px;
   flex-wrap: wrap;
+  margin-bottom: 6px;
 }
-.tileset-tilt label {
-  font-size: 12px;
-  color: #aaa;
-  white-space: nowrap;
+.tileset-rotation-inputs label {
+  font-size: 11px;
+  color: #888;
+  min-width: 12px;
 }
-.tileset-tilt input[type="number"] {
-  width: 64px;
-  padding: 4px 6px;
+.tileset-rotation-inputs input[type="number"] {
+  width: 52px;
+  padding: 4px 4px;
 }
-.tileset-tilt #btn-apply-tilt {
-  padding: 4px 8px;
+.tileset-rotation #btn-apply-tilt {
+  padding: 4px 10px;
 }
 
 #model-list-section {
