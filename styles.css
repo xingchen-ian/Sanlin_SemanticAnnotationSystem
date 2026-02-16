@@ -215,8 +215,12 @@ body {
   width: 52px;
   padding: 4px 4px;
 }
-.tileset-rotation #btn-apply-tilt {
+.tileset-rotation #btn-apply-tilt,
+.tileset-rotation #btn-check-tilt {
   padding: 4px 10px;
+}
+.tileset-rotation #btn-apply-tilt {
+  margin-right: 6px;
 }
 
 .tileset-lod {

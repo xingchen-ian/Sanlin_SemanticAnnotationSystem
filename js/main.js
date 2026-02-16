@@ -50,6 +50,7 @@ const state = {
   tilesetTiltCorrection: 0,     // 绕 Z 轴校正弧度，应用到 wrapper.rotation.z（不修改库的 group 避免子节点被清空）
   tilesetWrapper: null,         // 包裹 tilesRenderer.group 的外层 Group，用于施加三轴旋转校正
   tilesetErrorTarget: 2,        // LOD 屏幕空间误差目标（像素），值越小越远距离加载精细瓦片，可在 UI 调节
+  tilesetUrl: null,             // 当前加载的 tileset 根 URL（不含 cache bust），用于检查倾斜
   ambientLight: null,           // 环境光，供 UI 调节 intensity
   dirLight: null,               // 主方向光
   fillLight: null,              // 补光
@@ -286,6 +287,7 @@ async function loadTileset(tilesetUrl) {
     }
   }
 
+  state.tilesetUrl = url.split('?')[0]; // 保存当前 tileset URL 供检查倾斜用
   const tilesetUrlWithCacheBust = url + (url.includes('?') ? '&' : '?') + '_=' + Date.now();
 
   // 拦截 fetch 一次，记录 3D Tiles 相关请求失败（便于排查子 tile 404）
@@ -413,6 +415,84 @@ async function loadTileset(tilesetUrl) {
       resolve(tilesRenderer.group);
     }, 8000);
   });
+}
+
+// ----- 检查 tileset 数据是否自带倾斜（根或子 tile 的 transform / 包围盒朝向） -----
+async function checkTilesetTilt() {
+  const report = [];
+  const url = state.tilesetUrl || document.getElementById('tileset-url-input')?.value?.trim();
+  if (!url) {
+    report.push('请先加载 3D Tiles 或输入 tileset URL 后再检查');
+    console.log(report.join('\n'));
+    return report;
+  }
+  const baseUrl = (u) => {
+    try {
+      const a = new URL(u, window.location.origin);
+      const path = a.pathname.replace(/\/[^/]*$/, '/');
+      return a.origin + path;
+    } catch (_) { return ''; }
+  };
+  const toDeg = (r) => (r * 180 / Math.PI).toFixed(2) + '°';
+  try {
+    const res = await fetch(url);
+    if (!res.ok) throw new Error(res.status);
+    const json = await res.json();
+    const root = json?.root;
+    if (!root) {
+      report.push('无法解析 tileset 根节点');
+      console.log(report.join('\n'));
+      return report;
+    }
+    report.push('=== 模型倾斜检查 ===');
+    report.push('根 tileset: ' + url.split('/').pop());
+    // 1) 根节点 transform
+    if (root.transform && Array.isArray(root.transform) && root.transform.length >= 16) {
+      const m = new THREE.Matrix4();
+      m.fromArray(root.transform);
+      const e = new THREE.Euler();
+      e.setFromRotationMatrix(m);
+      report.push('根节点含 transform，旋转约: X=' + toDeg(e.x) + ' Y=' + toDeg(e.y) + ' Z=' + toDeg(e.z));
+    } else {
+      report.push('根节点无 transform（无固有旋转）');
+    }
+    // 2) 根包围盒是否轴对齐（box 后 9 个为三轴半长，若为 (x,0,0),(0,y,0),(0,0,z) 则轴对齐）
+    const box = root.boundingVolume?.box;
+    if (box && box.length >= 12) {
+      const ax = [box[3], box[4], box[5]], ay = [box[6], box[7], box[8]], az = [box[9], box[10], box[11]];
+      const axisAligned = [ax[1], ax[2], ay[0], ay[2], az[0], az[1]].every((v) => Math.abs(v) < 1e-6);
+      report.push('根包围盒: ' + (axisAligned ? '轴对齐' : '有旋转朝向'));
+    }
+    // 3) 子节点中若有 tileset 引用，取第一个拉取并检查其根 transform
+    const children = root.children || [];
+    const childTileset = children.find((c) => c.content?.uri && String(c.content.uri).toLowerCase().endsWith('tileset.json'));
+    if (childTileset?.content?.uri) {
+      const childUrl = baseUrl(url) + childTileset.content.uri;
+      try {
+        const cr = await fetch(childUrl);
+        if (cr.ok) {
+          const cjson = await cr.json();
+          const croot = cjson?.root;
+          if (croot?.transform && Array.isArray(croot.transform) && croot.transform.length >= 16) {
+            const cm = new THREE.Matrix4();
+            cm.fromArray(croot.transform);
+            const ce = new THREE.Euler();
+            ce.setFromRotationMatrix(cm);
+            report.push('子 tileset 根节点含 transform，旋转约: X=' + toDeg(ce.x) + ' Y=' + toDeg(ce.y) + ' Z=' + toDeg(ce.z));
+            report.push('→ 结论: 倾斜来自数据本身，可用「旋转校正」补偿');
+          } else {
+            report.push('子 tileset 根节点无 transform');
+          }
+        }
+      } catch (_) {
+        report.push('无法拉取子 tileset 以检查');
+      }
+    }
+  } catch (e) {
+    report.push('检查失败: ' + (e?.message || e));
+  }
+  console.log(report.join('\n'));
+  return report;
 }
 
 // ----- 3D Tiles 诊断：在控制台执行 debugTileset() 查看当前加载状态 -----
@@ -1858,6 +1938,12 @@ async function init() {
     }
   });
 
+  document.getElementById('btn-check-tilt').addEventListener('click', async () => {
+    const report = await checkTilesetTilt();
+    const conclusion = report.find((r) => r.includes('结论') || r.includes('子 tileset 根节点含 transform'));
+    setPersistStatus(conclusion || (report[0] || '已输出到控制台 (F12)'));
+  });
+
   (function initLodControl() {
     const rangeEl = document.getElementById('tileset-lod-range');
     const inputEl = document.getElementById('tileset-lod-input');
@@ -1940,6 +2026,7 @@ async function init() {
 
   // 控制台可执行 debugTileset() 检查 3D Tiles 加载状态
   window.debugTileset = debugTileset;
+  window.checkTilesetTilt = checkTilesetTilt;
 
   updateSelectionUI();
   updateAnnotationList();
