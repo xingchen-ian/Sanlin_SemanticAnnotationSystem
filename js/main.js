@@ -1709,7 +1709,7 @@ async function init() {
   state.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
   state.renderer.outputColorSpace = THREE.SRGBColorSpace;
   state.renderer.toneMapping = THREE.ACESFilmicToneMapping;
-  state.renderer.toneMappingExposure = 1.3;
+  state.renderer.toneMappingExposure = 1.0;  // 原 1.3 会偏亮，降为 1.0
 
   const controls = new OrbitControls(state.camera, canvas);
   controls.target.set(0, 0, 0);
@@ -1722,12 +1722,13 @@ async function init() {
   };
   state.controls = controls;
 
-  const ambient = new THREE.AmbientLight(0xffffff, 1.0);
+  // 灯光强度调低，避免 3D Tiles / 模型过亮
+  const ambient = new THREE.AmbientLight(0xffffff, 0.5);   // 原 1.0
   state.scene.add(ambient);
-  const dir = new THREE.DirectionalLight(0xffffff, 1.2);
+  const dir = new THREE.DirectionalLight(0xffffff, 0.85);   // 原 1.2
   dir.position.set(10, 15, 10);
   state.scene.add(dir);
-  const fill = new THREE.DirectionalLight(0xffffff, 0.4);
+  const fill = new THREE.DirectionalLight(0xffffff, 0.25); // 原 0.4
   fill.position.set(-8, 8, -8);
   state.scene.add(fill);
 
