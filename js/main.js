@@ -324,6 +324,13 @@ async function loadTileset(tilesetUrl) {
   tilesRenderer.setCamera(state.camera);
   tilesRenderer.setResolutionFromRenderer(state.camera, state.renderer);
 
+  // LOD 与加载速度：errorTarget 越小越早加载精细瓦片（距离更远）；队列并发与每帧处理数提高以加快加载
+  tilesRenderer.errorTarget = 2;           // 默认 6，减小后更远距离即加载高细节（屏幕空间误差目标，像素）
+  tilesRenderer.maxProcessedTiles = 450;    // 默认 250，每帧多处理一些瓦片，减少加载等待
+  if (tilesRenderer.downloadQueue) tilesRenderer.downloadQueue.maxJobs = 40;   // 默认 25，提高下载并发
+  if (tilesRenderer.parseQueue) tilesRenderer.parseQueue.maxJobs = 12;          // 默认 5，提高解析并发
+  if (tilesRenderer.processNodeQueue) tilesRenderer.processNodeQueue.maxJobs = 40; // 默认 25
+
   const dracoLoader = new DRACOLoader();
   dracoLoader.setDecoderPath(DRACO_PATH);
   const gltfLoader = new GLTFLoader(tilesRenderer.manager);
