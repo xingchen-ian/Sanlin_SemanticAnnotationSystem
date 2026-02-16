@@ -206,22 +206,66 @@ function syncTilesetMeshes() {
   });
 }
 
-// ----- 加载 3D Tiles（tileset.json 的完整 URL，使用 NASA 3d-tiles-renderer） -----
-async function loadTileset(tilesetUrl) {
-  let url = tilesetUrl?.trim();
-  if (!url) throw new Error('请输入 tileset.json 的 URL');
+// ----- 解析 tileset URL：同源时若 404 则尝试 /public/ 与根路径互换（兼容不同部署方式） -----
+function resolveTilesetUrl(inputUrl) {
+  let url = inputUrl?.trim();
+  if (!url) return null;
   if (url.startsWith('/') || url.startsWith('./')) {
     url = new URL(url, window.location.origin).href;
   }
-  // 先检查 URL 是否可访问，便于排查 404/CORS（失败时仍继续尝试加载）
+  return url;
+}
+
+function getTilesetUrlAlternate(absoluteUrl) {
   try {
-    const res = await fetch(url, { method: 'HEAD' });
-    if (!res.ok && res.status !== 304) {
-      throw new Error('tileset.json 返回 ' + res.status + '，请检查 URL 是否正确');
+    const u = new URL(absoluteUrl);
+    const path = u.pathname;
+    if (path.startsWith('/public/')) {
+      return u.origin + path.slice(7); // 去掉 /public
     }
-  } catch (e) {
-    if (e.message?.startsWith('tileset.json 返回')) throw e;
-    console.warn('[3D Tiles] HEAD 预检失败，继续尝试加载:', e?.message || e);
+    if (!path.startsWith('/public') && path.includes('/terra_b3dms/')) {
+      return u.origin + '/public' + path; // 加上 /public
+    }
+  } catch (_) {}
+  return null;
+}
+
+async function ensureTilesetUrlReachable(url) {
+  const tryUrl = async (u) => {
+    const res = await fetch(u, { method: 'HEAD' });
+    return res.ok || res.status === 304 ? u : null;
+  };
+  let ok = await tryUrl(url);
+  if (ok) return url;
+  const alt = getTilesetUrlAlternate(url);
+  if (alt) {
+    ok = await tryUrl(alt);
+    if (ok) {
+      console.warn('[3D Tiles] 原 URL 不可用，已改用:', alt);
+      return alt;
+    }
+  }
+  return null;
+}
+
+// ----- 加载 3D Tiles（tileset.json 的完整 URL，使用 NASA 3d-tiles-renderer） -----
+async function loadTileset(tilesetUrl) {
+  let url = resolveTilesetUrl(tilesetUrl);
+  if (!url) throw new Error('请输入 tileset.json 的 URL');
+  // 先检查 URL 是否可访问；若 404 则尝试 /public/ 与根路径互换（兼容 Vercel 等部署）
+  const reachable = await ensureTilesetUrlReachable(url);
+  if (reachable) {
+    url = reachable;
+  } else {
+    try {
+      const res = await fetch(url, { method: 'HEAD' });
+      if (!res.ok && res.status !== 304) {
+        throw new Error('tileset.json 返回 ' + res.status + '，请检查 URL（可尝试 /terra_b3dms/tileset.json 或 /public/terra_b3dms/tileset.json）');
+      }
+    } catch (e) {
+      if (e.message?.startsWith('tileset.json 返回')) throw e;
+      console.warn('[3D Tiles] HEAD 预检失败，继续尝试加载:', e?.message || e);
+    }
   }
 
   const tilesetUrlWithCacheBust = url + (url.includes('?') ? '&' : '?') + '_=' + Date.now();
