@@ -1322,22 +1322,25 @@ async function deleteAnnotation(idx) {
   updateHighlight();
 }
 
-// ----- 添加标注 -----
+// ----- 新建标注：当前选中的全部面用一个整体 box 包裹，一条引线 -----
 function addAnnotation() {
   const label = document.getElementById('annot-label').value.trim() || '未命名';
   const category = document.getElementById('annot-category').value.trim() || '';
   const color = document.getElementById('annot-color').value;
-  const targets = [];
-  state.selectedTargets.forEach((faceIndices, meshId) => {
-    const faceList = faceIndices && faceIndices.length > 0 ? [...faceIndices] : undefined;
-    const worldBox = computeWorldBoxForTarget(meshId, faceList);
-    targets.push({
-      meshId,
-      faceIndices: faceList,
-      worldBox: worldBox || undefined,
-    });
-  });
-  if (targets.length === 0) return;
+  if (state.selectedTargets.size === 0) return;
+
+  const worldBox = computeWorldBoxFromSelection();
+  const first = state.selectedTargets.entries().next().value;
+  const [firstMeshId, firstFaceIndices] = first ? first : [null, null];
+  const faceList = firstFaceIndices == null
+    ? undefined
+    : (Array.isArray(firstFaceIndices) && firstFaceIndices.length > 0 ? [...firstFaceIndices] : undefined);
+
+  const targets = [{
+    meshId: firstMeshId,
+    faceIndices: faceList,
+    worldBox: worldBox || undefined,
+  }];
 
   const annot = {
     id: `annot_${Date.now()}`,
