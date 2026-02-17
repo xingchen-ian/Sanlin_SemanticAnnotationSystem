@@ -1413,24 +1413,27 @@ function mergeTargetsIntoAnnotation(annot, newTargets) {
   });
 }
 
-// 添加到已有标注：当前选中的一组面作为新 target，新增一个 box + 一条引线，共用该标注的 label/颜色（不合并到已有 target）
+// 添加到已有标注：当前选中的全部面视为一组，只新增一个 box + 一条引线（与「新建标注」一致，避免多 mesh 时出现多个 box）
 function addToAnnotation() {
   const selectEl = document.getElementById('annot-target-select');
   const idx = parseInt(selectEl.value, 10);
   const annot = state.annotations[idx];
   if (!annot) return;
-  const newTargets = [];
-  state.selectedTargets.forEach((faceIndices, meshId) => {
-    const faceList = faceIndices && faceIndices.length > 0 ? [...faceIndices] : undefined;
-    const worldBox = computeWorldBoxForTarget(meshId, faceList);
-    newTargets.push({
-      meshId,
-      faceIndices: faceList,
-      worldBox: worldBox || undefined,
-    });
-  });
-  if (newTargets.length === 0) return;
-  annot.targets = (annot.targets || []).concat(newTargets);
+  if (state.selectedTargets.size === 0) return;
+
+  const worldBox = computeWorldBoxFromSelection();
+  const first = state.selectedTargets.entries().next().value;
+  const [firstMeshId, firstFaceIndices] = first ? first : [null, null];
+  const faceList = firstFaceIndices == null
+    ? undefined
+    : (Array.isArray(firstFaceIndices) && firstFaceIndices.length > 0 ? [...firstFaceIndices] : undefined);
+
+  const oneTarget = {
+    meshId: firstMeshId,
+    faceIndices: faceList,
+    worldBox: worldBox || undefined,
+  };
+  annot.targets = (annot.targets || []).concat(oneTarget);
   updateAnnotationList();
   updateHighlight();
 }
