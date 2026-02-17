@@ -52,6 +52,8 @@ const state = {
   tilesetErrorTarget: 2,        // LOD 屏幕空间误差目标（像素），值越小越远距离加载精细瓦片，可在 UI 调节
   selectionHighLOD: false,     // 为面选择强制使用最高精度 LOD（errorTarget 临时调小），便于在精细几何上选面标注
   tilesetUrl: null,             // 当前加载的 tileset 根 URL（不含 cache bust），用于检查倾斜
+  tilesetMaterialOpacity: 1,    // 3D Tiles 材质透明度 0~1，由滑条调节
+  tilesetMaterialSaturation: 1,  // 3D Tiles 材质饱和度倍数，0=灰 1=原色 >1=更艳，由滑条调节
   ambientLight: null,           // 环境光，供 UI 调节 intensity
   dirLight: null,               // 主方向光
   fillLight: null,              // 补光
@@ -224,6 +226,30 @@ function syncTilesetMeshes() {
     obj.userData.meshId = meshId;
     const origMat = obj.material?.clone?.() ?? new THREE.MeshStandardMaterial({ color: 0x888888 });
     state.meshes.push({ mesh: obj, meshId, originalMaterial: origMat });
+  });
+}
+
+// ----- 3D Tiles：将透明度与饱和度应用到所有 tile 材质 -----
+function applyTilesetMaterialSettings() {
+  if (!state.tilesetRoot) return;
+  const opacity = Math.max(0, Math.min(1, state.tilesetMaterialOpacity));
+  const sat = Math.max(0, Math.min(3, state.tilesetMaterialSaturation));
+  state.tilesetRoot.traverse((obj) => {
+    if (!obj.isMesh || !obj.material) return;
+    const mats = Array.isArray(obj.material) ? obj.material : [obj.material];
+    const entry = state.meshes.find((m) => m.mesh === obj);
+    const baseColor = entry?.originalMaterial?.color;
+    mats.forEach((mat, i) => {
+      if (!mat) return;
+      mat.transparent = opacity < 1;
+      mat.opacity = opacity;
+      if (mat.color && baseColor) {
+        const hsl = { h: 0, s: 0, l: 0 };
+        baseColor.getHSL(hsl);
+        hsl.s *= sat;
+        mat.color.setHSL(hsl.h, Math.min(1, hsl.s), hsl.l);
+      }
+    });
   });
 }
 
@@ -2195,6 +2221,29 @@ async function init() {
     inputEl?.addEventListener('change', () => applyLod(inputEl.value));
   })();
 
+  (function initTilesetMaterialControls() {
+    const opacityEl = document.getElementById('tileset-material-opacity');
+    const opacityValueEl = document.getElementById('tileset-material-opacity-value');
+    const satEl = document.getElementById('tileset-material-saturation');
+    const satValueEl = document.getElementById('tileset-material-saturation-value');
+    if (opacityEl && opacityValueEl) {
+      opacityEl.value = String(state.tilesetMaterialOpacity);
+      opacityValueEl.textContent = Math.round(state.tilesetMaterialOpacity * 100) + '%';
+      opacityEl.addEventListener('input', () => {
+        state.tilesetMaterialOpacity = parseFloat(opacityEl.value);
+        opacityValueEl.textContent = Math.round(state.tilesetMaterialOpacity * 100) + '%';
+      });
+    }
+    if (satEl && satValueEl) {
+      satEl.value = String(state.tilesetMaterialSaturation);
+      satValueEl.textContent = Math.round(state.tilesetMaterialSaturation * 100) + '%';
+      satEl.addEventListener('input', () => {
+        state.tilesetMaterialSaturation = parseFloat(satEl.value);
+        satValueEl.textContent = Math.round(state.tilesetMaterialSaturation * 100) + '%';
+      });
+    }
+  })();
+
   (function initLightingControls() {
     const cfg = [
       { id: 'light-exposure', valueId: 'light-exposure-value', min: 0.5, max: 2, step: 0.05, set: (v) => { if (state.renderer) state.renderer.toneMappingExposure = v; } },
@@ -2315,6 +2364,7 @@ async function init() {
         state.tilesetWrapper.rotation.z = state.tilesetTiltCorrection;
       }
       syncTilesetMeshes();
+      applyTilesetMaterialSettings();
     }
     state.renderer.render(state.scene, state.camera);
     updateCalloutOverlay();

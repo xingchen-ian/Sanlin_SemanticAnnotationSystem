@@ -68,6 +68,19 @@
             </div>
             <span class="tileset-lod-hint">值越小越远加载精细，越大越近才加载</span>
           </div>
+          <div class="tileset-material">
+            <span class="tileset-material-title">Tile 材质</span>
+            <div class="tileset-material-row">
+              <label for="tileset-material-opacity">透明度</label>
+              <input type="range" id="tileset-material-opacity" min="0" max="1" step="0.05" value="1" title="0=全透明 1=不透明" />
+              <span id="tileset-material-opacity-value" class="tileset-material-value">100%</span>
+            </div>
+            <div class="tileset-material-row">
+              <label for="tileset-material-saturation">饱和度</label>
+              <input type="range" id="tileset-material-saturation" min="0" max="2" step="0.1" value="1" title="0=灰度 1=原色 2=更艳" />
+              <span id="tileset-material-saturation-value" class="tileset-material-value">100%</span>
+            </div>
+          </div>
         </div>
         <div id="model-list-section">
           <h3 class="model-list-title">我的模型</h3>
