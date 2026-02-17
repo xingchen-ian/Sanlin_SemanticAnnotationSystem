@@ -216,6 +216,46 @@ async function loadModel(urlOrFile) {
   return gltf.scene;
 }
 
+// ----- 为材质注入 fragment 饱和度（对最终输出 RGB 做 HSL 饱和度，贴图也会生效） -----
+function injectSaturationIntoMaterial(mat) {
+  if (mat.userData._tilesetSaturationInjected) return;
+  mat.userData._tilesetSaturation = { value: 1 };
+  mat.onBeforeCompile = (shader) => {
+    shader.uniforms.uSaturation = mat.userData._tilesetSaturation;
+    shader.fragmentShader = shader.fragmentShader.replace(
+      '#include <dithering_fragment>',
+      `#include <dithering_fragment>
+uniform float uSaturation;
+float tilesetHue2rgb(float p, float q, float t) {
+  t = mod(t, 1.0);
+  if (t < 1.0/6.0) return p + (q-p)*6.0*t;
+  if (t < 0.5) return q;
+  if (t < 2.0/3.0) return p + (q-p)*(2.0/3.0 - t)*6.0;
+  return p;
+}
+vec3 tilesetRgb2hsl(vec3 c) {
+  float maxC = max(c.r,max(c.g,c.b)), minC = min(c.r,min(c.g,c.b));
+  float L = (maxC+minC)*0.5;
+  if (maxC == minC) return vec3(0.0, 0.0, L);
+  float S = (maxC-minC)/(1.0-abs(2.0*L-1.0));
+  float H; if (maxC==c.r) H=(c.g-c.b)/(maxC-minC); else if (maxC==c.g) H=2.0+(c.b-c.r)/(maxC-minC); else H=4.0+(c.r-c.g)/(maxC-minC);
+  H = mod(H/6.0, 1.0); if (H<0.0) H+=1.0;
+  return vec3(H,S,L);
+}
+vec3 tilesetHsl2rgb(vec3 h) {
+  if (h.y < 1e-6) return vec3(h.z);
+  float q = h.z<0.5 ? h.z*(1.0+h.y) : h.z+h.y-h.z*h.y, p = 2.0*h.z-q;
+  return vec3(tilesetHue2rgb(p,q,h.x+1.0/3.0), tilesetHue2rgb(p,q,h.x), tilesetHue2rgb(p,q,h.x-1.0/3.0));
+}
+vec3 satHsl = tilesetRgb2hsl(gl_FragColor.rgb);
+satHsl.y *= uSaturation;
+gl_FragColor.rgb = tilesetHsl2rgb(satHsl);
+`
+    );
+  };
+  mat.userData._tilesetSaturationInjected = true;
+}
+
 // ----- 3D Tiles：从 tileset 根节点同步已加载的 mesh 到 state.meshes（供选择/标注） -----
 function syncTilesetMeshes() {
   if (!state.tilesetRoot) return;
@@ -227,6 +267,7 @@ function syncTilesetMeshes() {
     const raw = obj.material;
     const mats = Array.isArray(raw) ? raw : [raw];
     const cloned = mats.map((m) => m?.clone?.() ?? new THREE.MeshStandardMaterial({ color: 0x888888 }));
+    cloned.forEach((m) => injectSaturationIntoMaterial(m));
     obj.material = cloned.length === 1 ? cloned[0] : cloned; // 用我们的材质替换，避免库每帧重置导致透明度/饱和度失效
     const firstColor = cloned[0]?.color;
     const baseColor = firstColor?.clone?.() ?? new THREE.Color(0x888888);
@@ -234,23 +275,28 @@ function syncTilesetMeshes() {
   });
 }
 
-// ----- 3D Tiles：将透明度与饱和度应用到所有 tile 材质（使用 sync 时保存的 baseColor，避免饱和度叠加） -----
+// ----- 3D Tiles：将透明度与饱和度应用到所有 tile 材质；每帧重新绑定我们的材质（解决 LOD 距离大时库覆盖导致透明度失效） -----
 function applyTilesetMaterialSettings() {
   if (!state.tilesetRoot) return;
   const opacity = Math.max(0, Math.min(1, state.tilesetMaterialOpacity));
   const sat = Math.max(0, Math.min(3, state.tilesetMaterialSaturation));
   state.tilesetRoot.traverse((obj) => {
     if (!obj.isMesh || !obj.material) return;
-    const mats = Array.isArray(obj.material) ? obj.material : [obj.material];
     const entry = state.meshes.find((m) => m.mesh === obj);
-    const baseColor = entry?.baseColor ?? entry?.originalMaterial?.color;
+    const ours = entry?.originalMaterial;
+    const current = obj.material;
+    const oursSingle = Array.isArray(ours) ? ours[0] : ours;
+    const currentSingle = Array.isArray(current) ? current[0] : current;
+    if (entry && oursSingle && currentSingle !== oursSingle) obj.material = ours; // 库覆盖了材质时重新绑定
+    const mats = Array.isArray(obj.material) ? obj.material : [obj.material];
     mats.forEach((mat) => {
       if (!mat) return;
       mat.transparent = opacity < 1;
       mat.opacity = opacity;
-      if (mat.color && baseColor) {
+      if (mat.userData._tilesetSaturation) mat.userData._tilesetSaturation.value = sat; // fragment 内饱和度（贴图也生效）
+      else if (mat.color && entry?.baseColor) {
         const hsl = { h: 0, s: 0, l: 0 };
-        baseColor.getHSL(hsl);
+        entry.baseColor.getHSL(hsl);
         hsl.s *= sat;
         mat.color.setHSL(hsl.h, Math.min(1, hsl.s), hsl.l);
       }
