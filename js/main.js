@@ -227,6 +227,15 @@ function syncTilesetMeshes() {
   });
 }
 
+// ----- 根据 tileset URL 生成稳定 modelId，便于 3D Tiles 标注保存/加载到 API -----
+function getTilesetModelId(tilesetUrl) {
+  if (!tilesetUrl || typeof tilesetUrl !== 'string') return null;
+  let h = 0;
+  const s = tilesetUrl.split('?')[0];
+  for (let i = 0; i < s.length; i++) h = ((h << 5) - h + s.charCodeAt(i)) | 0;
+  return 'tileset_' + Math.abs(h).toString(36);
+}
+
 // ----- 解析 tileset URL：同源时若 404 则尝试 /public/ 与根路径互换（兼容不同部署方式） -----
 function resolveTilesetUrl(inputUrl) {
   let url = inputUrl?.trim();
@@ -1863,8 +1872,12 @@ async function loadAnnotationsFromApi() {
 async function saveAnnotationsToApi() {
   const base = getApiUrl();
   const modelId = state.currentModelId;
-  if (!base || !modelId) {
-    setPersistStatus('请先配置 API 地址并加载示例建筑', true);
+  if (!base) {
+    setPersistStatus('请先配置 API 地址', true);
+    return;
+  }
+  if (!modelId) {
+    setPersistStatus('请先加载模型（示例建筑或 3D Tiles）', true);
     return;
   }
   if (!state.session?.access_token) {
@@ -1888,6 +1901,10 @@ async function saveAnnotationsToApi() {
     });
     if (r.status === 401) {
       setPersistStatus('请先登录', true);
+      return;
+    }
+    if (r.status === 404) {
+      setPersistStatus('服务器上暂无该模型记录（Tileset 需先在后台注册），请使用「导出标注」保存为 JSON', true);
       return;
     }
     if (!r.ok) throw new Error(await r.text());
@@ -2094,8 +2111,8 @@ async function init() {
     try {
       clearModel(state.scene);
       unsubscribePusher();
-      state.currentModelId = null; // 3D Tiles 暂不绑定后端模型，标注仅本地/导出
       await loadTileset(url);
+      state.currentModelId = getTilesetModelId(state.tilesetUrl);
       updateAnnotationList();
       updateSelectionUI();
     } catch (err) {
