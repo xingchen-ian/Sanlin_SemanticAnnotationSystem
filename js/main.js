@@ -224,12 +224,17 @@ function syncTilesetMeshes() {
     if (state.meshes.some((m) => m.mesh === obj)) return;
     const meshId = `mesh_${state.meshIdCounter++}`;
     obj.userData.meshId = meshId;
-    const origMat = obj.material?.clone?.() ?? new THREE.MeshStandardMaterial({ color: 0x888888 });
-    state.meshes.push({ mesh: obj, meshId, originalMaterial: origMat });
+    const raw = obj.material;
+    const mats = Array.isArray(raw) ? raw : [raw];
+    const cloned = mats.map((m) => m?.clone?.() ?? new THREE.MeshStandardMaterial({ color: 0x888888 }));
+    obj.material = cloned.length === 1 ? cloned[0] : cloned; // 用我们的材质替换，避免库每帧重置导致透明度/饱和度失效
+    const firstColor = cloned[0]?.color;
+    const baseColor = firstColor?.clone?.() ?? new THREE.Color(0x888888);
+    state.meshes.push({ mesh: obj, meshId, originalMaterial: cloned.length === 1 ? cloned[0] : cloned, baseColor });
   });
 }
 
-// ----- 3D Tiles：将透明度与饱和度应用到所有 tile 材质 -----
+// ----- 3D Tiles：将透明度与饱和度应用到所有 tile 材质（使用 sync 时保存的 baseColor，避免饱和度叠加） -----
 function applyTilesetMaterialSettings() {
   if (!state.tilesetRoot) return;
   const opacity = Math.max(0, Math.min(1, state.tilesetMaterialOpacity));
@@ -238,8 +243,8 @@ function applyTilesetMaterialSettings() {
     if (!obj.isMesh || !obj.material) return;
     const mats = Array.isArray(obj.material) ? obj.material : [obj.material];
     const entry = state.meshes.find((m) => m.mesh === obj);
-    const baseColor = entry?.originalMaterial?.color;
-    mats.forEach((mat, i) => {
+    const baseColor = entry?.baseColor ?? entry?.originalMaterial?.color;
+    mats.forEach((mat) => {
       if (!mat) return;
       mat.transparent = opacity < 1;
       mat.opacity = opacity;
