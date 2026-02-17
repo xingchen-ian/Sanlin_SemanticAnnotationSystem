@@ -227,6 +227,35 @@ function syncTilesetMeshes() {
   });
 }
 
+// ----- 为当前 tileset 在服务器上获取或创建模型记录，返回 UUID（供保存/加载标注、多人协作） -----
+async function ensureTilesetModel() {
+  const base = getApiUrl();
+  const url = state.tilesetUrl;
+  if (!base || !url) return null;
+  try {
+    const r = await fetch(`${base}/api/models`);
+    if (!r.ok) return null;
+    const list = await r.json();
+    const normalized = url.split('?')[0];
+    const existing = Array.isArray(list)
+      ? list.find((m) => (m.url || '').split('?')[0] === normalized)
+      : null;
+    if (existing?.id) return existing.id;
+    const name = '3D Tiles: ' + (url.split('/').filter(Boolean).pop() || 'tileset');
+    const cr = await fetch(`${base}/api/models`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name, url: normalized }),
+    });
+    if (!cr.ok) return null;
+    const model = await cr.json();
+    return model?.id || null;
+  } catch (e) {
+    console.warn('ensureTilesetModel:', e);
+    return null;
+  }
+}
+
 // ----- 解析 tileset URL：同源时若 404 则尝试 /public/ 与根路径互换（兼容不同部署方式） -----
 function resolveTilesetUrl(inputUrl) {
   let url = inputUrl?.trim();
@@ -1869,9 +1898,9 @@ async function saveAnnotationsToApi() {
   }
   if (!modelId) {
     if (state.tilesetUrl) {
-      setPersistStatus('3D Tiles 标注暂不支持保存到服务器（需 UUID 模型 ID），请使用「导出标注」保存为 JSON', true);
+      setPersistStatus('无法关联到服务器模型（请检查 API 地址与网络后重新加载 3D Tiles），或使用「导出标注」保存为 JSON', true);
     } else {
-      setPersistStatus('请先从模型列表加载示例建筑', true);
+      setPersistStatus('请先加载模型（示例建筑或 3D Tiles）', true);
     }
     return;
   }
@@ -2107,7 +2136,11 @@ async function init() {
       clearModel(state.scene);
       unsubscribePusher();
       await loadTileset(url);
-      state.currentModelId = null; // 后端 modelId 为 UUID，3D Tiles 标注请用「导出标注」保存
+      state.currentModelId = await ensureTilesetModel();
+      if (state.currentModelId) {
+        subscribePusher(state.currentModelId);
+        if (state.session?.access_token) await loadAnnotationsFromApi();
+      }
       updateAnnotationList();
       updateSelectionUI();
     } catch (err) {
