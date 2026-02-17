@@ -1387,18 +1387,24 @@ function mergeTargetsIntoAnnotation(annot, newTargets) {
   });
 }
 
+// 添加到已有标注：当前选中的一组面作为新 target，新增一个 box + 一条引线，共用该标注的 label/颜色（不合并到已有 target）
 function addToAnnotation() {
   const selectEl = document.getElementById('annot-target-select');
   const idx = parseInt(selectEl.value, 10);
   const annot = state.annotations[idx];
   if (!annot) return;
-  const targets = [];
+  const newTargets = [];
   state.selectedTargets.forEach((faceIndices, meshId) => {
-    targets.push({ meshId, faceIndices: faceIndices && faceIndices.length > 0 ? [...faceIndices] : undefined });
+    const faceList = faceIndices && faceIndices.length > 0 ? [...faceIndices] : undefined;
+    const worldBox = computeWorldBoxForTarget(meshId, faceList);
+    newTargets.push({
+      meshId,
+      faceIndices: faceList,
+      worldBox: worldBox || undefined,
+    });
   });
-  if (targets.length === 0) return;
-  mergeTargetsIntoAnnotation(annot, targets);
-  ensureWorldBoxesForAnnotation(annot);
+  if (newTargets.length === 0) return;
+  annot.targets = (annot.targets || []).concat(newTargets);
   updateAnnotationList();
   updateHighlight();
 }
