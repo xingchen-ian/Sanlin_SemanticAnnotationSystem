@@ -652,7 +652,16 @@ function extractFacesGeometry(geometry, faceIndices) {
   return geo;
 }
 
-// ----- 射线检测单选 -----
+// ----- 获取 mesh 的面数（用于在多个 LOD 交点中优先选最高精度） -----
+function getMeshFaceCount(mesh) {
+  const g = mesh?.geometry;
+  if (!g) return 0;
+  if (g.index) return g.index.count / 3;
+  const pos = g.attributes?.position;
+  return pos ? pos.count / 3 : 0;
+}
+
+// ----- 射线检测单选（同一射线可能穿过多个 LOD 的 mesh，优先取几何最精细的一个） -----
 function performClickSelect(event) {
   const canvas = document.getElementById('canvas');
   const rect = canvas.getBoundingClientRect();
@@ -670,7 +679,10 @@ function performClickSelect(event) {
     return;
   }
 
-  const hit = intersects[0];
+  // 多个交点时优先选择面数最多的 mesh（即当前可见的最高精度 LOD），避免选到粗 LOD 的面
+  const hit = intersects.reduce((best, cur) =>
+    getMeshFaceCount(cur.object) > getMeshFaceCount(best.object) ? cur : best
+  );
   const meshId = hit.object.userData.meshId;
   const faceIndex = hit.faceIndex;
   if (!meshId) return;
@@ -2074,7 +2086,7 @@ async function init() {
     document.getElementById('btn-mode-object').classList.remove('active');
     updateSelectionUI();
     updateHighlight();
-    document.getElementById('hint').textContent = '面模式：左键选择面 · Alt+左键拖拽框选 · 右键旋转';
+    document.getElementById('hint').textContent = '面模式：左键选择面 · Alt+左键框选 · 勾选「高精度选择」可在最细 LOD 上选面';
   });
 
   const chkHighLod = document.getElementById('chk-selection-high-lod');
