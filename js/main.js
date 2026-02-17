@@ -55,6 +55,7 @@ const state = {
   ambientLight: null,           // 环境光，供 UI 调节 intensity
   dirLight: null,               // 主方向光
   fillLight: null,              // 补光
+  annotationBoxGroup: null,     // 标注与选区的半透明 box 容器（世界坐标），加入 scene
 };
 
 const supabase = (() => {
@@ -742,6 +743,104 @@ function getFaceWorldCenter(mesh, faceIndex) {
   return v0.add(v1).add(v2).divideScalar(3);
 }
 
+// ----- 世界空间 AABB：用于标注/选区的半透明 box（与 LOD 无关） -----
+function getFaceWorldVertices(mesh, faceIndex) {
+  const geo = mesh.geometry;
+  const pos = geo.attributes.position;
+  const idx = geo.index;
+  let i0, i1, i2;
+  if (idx) {
+    i0 = idx.getX(faceIndex * 3);
+    i1 = idx.getX(faceIndex * 3 + 1);
+    i2 = idx.getX(faceIndex * 3 + 2);
+  } else {
+    i0 = faceIndex * 3;
+    i1 = faceIndex * 3 + 1;
+    i2 = faceIndex * 3 + 2;
+  }
+  const v0 = new THREE.Vector3(pos.getX(i0), pos.getY(i0), pos.getZ(i0));
+  const v1 = new THREE.Vector3(pos.getX(i1), pos.getY(i1), pos.getZ(i1));
+  const v2 = new THREE.Vector3(pos.getX(i2), pos.getY(i2), pos.getZ(i2));
+  v0.applyMatrix4(mesh.matrixWorld);
+  v1.applyMatrix4(mesh.matrixWorld);
+  v2.applyMatrix4(mesh.matrixWorld);
+  return [v0, v1, v2];
+}
+
+function computeWorldBoxForTarget(meshId, faceIndices) {
+  const entry = state.meshes.find((m) => m.meshId === meshId);
+  if (!entry?.mesh?.geometry) return null;
+  const mesh = entry.mesh;
+  const box = new THREE.Box3();
+  const faceSet = new Set(faceIndices && faceIndices.length > 0 ? faceIndices : null);
+  const faceCount = mesh.geometry.index
+    ? mesh.geometry.index.count / 3
+    : mesh.geometry.attributes.position.count / 3;
+  for (let fi = 0; fi < faceCount; fi++) {
+    if (faceSet && !faceSet.has(fi)) continue;
+    const [v0, v1, v2] = getFaceWorldVertices(mesh, fi);
+    box.expandByPoint(v0);
+    box.expandByPoint(v1);
+    box.expandByPoint(v2);
+  }
+  const min = box.min.toArray();
+  const max = box.max.toArray();
+  if (min[0] === max[0] && min[1] === max[1] && min[2] === max[2]) return null;
+  return { min, max };
+}
+
+function computeWorldBoxFromSelection() {
+  if (state.selectedTargets.size === 0) return null;
+  const box = new THREE.Box3();
+  state.selectedTargets.forEach((faceIndices, meshId) => {
+    const entry = state.meshes.find((m) => m.meshId === meshId);
+    if (!entry?.mesh?.geometry) return;
+    const mesh = entry.mesh;
+    const faceSet = faceIndices == null ? null : new Set(faceIndices);
+    const faceCount = mesh.geometry.index
+      ? mesh.geometry.index.count / 3
+      : mesh.geometry.attributes.position.count / 3;
+    for (let fi = 0; fi < faceCount; fi++) {
+      if (faceSet && !faceSet.has(fi)) continue;
+      const [v0, v1, v2] = getFaceWorldVertices(mesh, fi);
+      box.expandByPoint(v0);
+      box.expandByPoint(v1);
+      box.expandByPoint(v2);
+    }
+  });
+  const min = box.min.toArray();
+  const max = box.max.toArray();
+  if (min[0] === max[0] && min[1] === max[1] && min[2] === max[2]) return null;
+  return { min, max };
+}
+
+function createBoxMeshFromWorldBox(worldBox, color, opacity) {
+  const [min, max] = [worldBox.min, worldBox.max];
+  const cx = (min[0] + max[0]) / 2;
+  const cy = (min[1] + max[1]) / 2;
+  const cz = (min[2] + max[2]) / 2;
+  const sx = Math.max(max[0] - min[0], 0.01);
+  const sy = Math.max(max[1] - min[1], 0.01);
+  const sz = Math.max(max[2] - min[2], 0.01);
+  const geo = new THREE.BoxGeometry(1, 1, 1);
+  const mat = createOverlayMaterial(color, opacity);
+  const mesh = new THREE.Mesh(geo, mat);
+  mesh.position.set(cx, cy, cz);
+  mesh.scale.set(sx, sy, sz);
+  mesh.userData.isAnnotationBox = true;
+  return mesh;
+}
+
+function ensureWorldBoxesForAnnotation(annot) {
+  if (!annot.targets) return;
+  annot.targets.forEach((t) => {
+    if (t.worldBox) return;
+    const faceIndices = t.faceIndices && t.faceIndices.length > 0 ? t.faceIndices : undefined;
+    const box = computeWorldBoxForTarget(t.meshId, faceIndices);
+    if (box) t.worldBox = box;
+  });
+}
+
 // ----- 框选：根据矩形选择 mesh 或面 -----
 function performBoxSelect(startNDC, endNDC) {
   const left = Math.min(startNDC.x, endNDC.x);
@@ -870,18 +969,38 @@ function getAnnotationsForMesh(meshId) {
   );
 }
 
-// ----- 计算标注的 3D 中心（世界坐标），以最先选择的目标为准 -----
+// ----- 计算标注的 3D 中心（世界坐标），以最先选择的目标为准（兼容旧逻辑） -----
 function getAnnotationWorldCenter(annot) {
-  const t = annot.targets?.[0];
-  if (!t) return null;
-  const entry = state.meshes.find(m => m.meshId === t.meshId);
-  if (!entry) return null;
-  const { mesh } = entry;
-  if (!t.faceIndices || t.faceIndices.length === 0) {
-    const box = new THREE.Box3().setFromObject(mesh);
-    return box.getCenter(new THREE.Vector3());
-  }
-  return getFaceWorldCenter(mesh, t.faceIndices[0]);
+  const pts = getAnnotationAnchorPoints(annot);
+  return pts.length > 0 ? pts[0] : null;
+}
+
+// ----- 标注的每个 target 一个锚点（用于引线），优先用 worldBox 中心 -----
+function getAnnotationAnchorPoints(annot) {
+  const out = [];
+  if (!annot.targets) return out;
+  annot.targets.forEach((t) => {
+    if (t.worldBox) {
+      const min = t.worldBox.min;
+      const max = t.worldBox.max;
+      out.push(new THREE.Vector3(
+        (min[0] + max[0]) / 2,
+        (min[1] + max[1]) / 2,
+        (min[2] + max[2]) / 2
+      ));
+      return;
+    }
+    const entry = state.meshes.find((m) => m.meshId === t.meshId);
+    if (!entry?.mesh) return;
+    const mesh = entry.mesh;
+    if (!t.faceIndices || t.faceIndices.length === 0) {
+      const box = new THREE.Box3().setFromObject(mesh);
+      out.push(box.getCenter(new THREE.Vector3()));
+    } else {
+      out.push(getFaceWorldCenter(mesh, t.faceIndices[0]));
+    }
+  });
+  return out;
 }
 
 // ----- 绘制专利图式标注：白线 + 白色文字 -----
@@ -910,38 +1029,40 @@ function updateCalloutOverlay() {
 
   state.annotations.forEach((annot) => {
     if (state.hiddenAnnotationIds.has(annot.id)) return;
-    const worldCenter = getAnnotationWorldCenter(annot);
-    if (!worldCenter) return;
-    proj.copy(worldCenter).project(state.camera);
+    const anchors = getAnnotationAnchorPoints(annot);
+    if (anchors.length === 0) return;
+    // 用第一个锚点决定标签位置与左右方向，所有引线汇聚到同一标签
+    proj.copy(anchors[0]).project(state.camera);
     if (proj.z > 1 || proj.z < -1) return;
-
-    const px = (proj.x + 1) / 2 * canvas.width;
-    const py = (1 - proj.y) / 2 * canvas.height;
+    const firstPx = (proj.x + 1) / 2 * canvas.width;
+    const firstPy = (1 - proj.y) / 2 * canvas.height;
+    const dx = firstPx < canvas.width / 2 ? -1 : 1;
+    const tx = firstPx + dx * LINE_LENGTH * cos45;
+    const ty = firstPy - LINE_LENGTH * sin45;
 
     const label = annot.label || '未命名';
     ctx.font = FONT;
 
-    // 左侧标注向左上、右侧向右上，引线朝两侧外指，减少交叉
-    const dx = px < canvas.width / 2 ? -1 : 1;
-    const tx = px + dx * LINE_LENGTH * cos45;
-    const ty = py - LINE_LENGTH * sin45;
-
-    const vx = tx - px;
-    const vy = ty - py;
-    const cp1x = px + 0.35 * vx;
-    const cp1y = py + 0.35 * vy - S_CURVE_AMPLITUDE * cos45;
-    const cp2x = px + 0.65 * vx;
-    const cp2y = py + 0.65 * vy + S_CURVE_AMPLITUDE * cos45;
-
-    ctx.strokeStyle = '#ffffff';
-    ctx.lineWidth = 1.5;
-    ctx.beginPath();
-    ctx.moveTo(px, py);
-    ctx.bezierCurveTo(cp1x, cp1y, cp2x, cp2y, tx, ty);
-    ctx.stroke();
+    anchors.forEach((worldAnchor) => {
+      proj.copy(worldAnchor).project(state.camera);
+      if (proj.z > 1 || proj.z < -1) return;
+      const px = (proj.x + 1) / 2 * canvas.width;
+      const py = (1 - proj.y) / 2 * canvas.height;
+      const vx = tx - px;
+      const vy = ty - py;
+      const cp1x = px + 0.35 * vx;
+      const cp1y = py + 0.35 * vy - S_CURVE_AMPLITUDE * cos45;
+      const cp2x = px + 0.65 * vx;
+      const cp2y = py + 0.65 * vy + S_CURVE_AMPLITUDE * cos45;
+      ctx.strokeStyle = '#ffffff';
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      ctx.moveTo(px, py);
+      ctx.bezierCurveTo(cp1x, cp1y, cp2x, cp2y, tx, ty);
+      ctx.stroke();
+    });
 
     ctx.fillStyle = '#ffffff';
-    ctx.font = FONT;
     ctx.textBaseline = 'middle';
     ctx.textAlign = dx > 0 ? 'left' : 'right';
     ctx.fillText(label, tx + (dx > 0 ? 4 : -4), ty);
@@ -961,7 +1082,7 @@ function createOverlayMaterial(color, opacity) {
   });
 }
 
-// ----- 高亮选中与标注（在原始材质上叠加颜色） -----
+// ----- 高亮选中与标注：用世界空间半透明 box 显示（与 LOD 无关） -----
 function updateHighlight() {
   const highlightColor = 0x00aaff;
 
@@ -970,56 +1091,35 @@ function updateHighlight() {
   });
   state.faceOverlayMeshes.clear();
 
-  state.meshes.forEach(({ mesh, meshId, originalMaterial }) => {
-    if (!mesh.parent) return; // 3D Tiles 中可能已从场景卸载
-    const sel = state.selectedTargets.get(meshId);
-    const annots = getAnnotationsForMesh(meshId).filter(
-      (a) => !state.hiddenAnnotationIds.has(a.id)
-    );
-
+  state.meshes.forEach(({ mesh, originalMaterial }) => {
+    if (!mesh.parent) return;
     mesh.material = originalMaterial;
+  });
 
-    if (sel !== undefined) {
-      if (sel === null) {
-        const overlay = new THREE.Mesh(
-          mesh.geometry,
-          createOverlayMaterial(highlightColor)
-        );
-        overlay.userData.isFaceOverlay = true;
-        mesh.add(overlay);
-        state.faceOverlayMeshes.set(`${meshId}_sel`, overlay);
-      } else {
-        const geo = extractFacesGeometry(mesh.geometry, sel);
-        if (geo) {
-          const overlay = new THREE.Mesh(geo, createOverlayMaterial(highlightColor));
-          overlay.userData.isFaceOverlay = true;
-          mesh.add(overlay);
-          state.faceOverlayMeshes.set(`${meshId}_sel`, overlay);
-        }
-      }
-    }
+  if (!state.annotationBoxGroup) return;
+  while (state.annotationBoxGroup.children.length) {
+    const child = state.annotationBoxGroup.children[0];
+    child.geometry?.dispose();
+    child.material?.dispose();
+    state.annotationBoxGroup.remove(child);
+  }
 
-    annots.forEach((annot) => {
-      const faceTarget = annot.targets.find(t => t.meshId === meshId);
-      const faceIndices = faceTarget?.faceIndices;
-      const key = `${meshId}_annot_${annot.id}`;
-      if (!faceIndices || faceIndices.length === 0) {
-        const overlay = new THREE.Mesh(
-          mesh.geometry,
-          createOverlayMaterial(annot.color)
-        );
-        overlay.userData.isFaceOverlay = true;
-        mesh.add(overlay);
-        state.faceOverlayMeshes.set(key, overlay);
-      } else {
-        const geo = extractFacesGeometry(mesh.geometry, faceIndices);
-        if (geo) {
-          const overlay = new THREE.Mesh(geo, createOverlayMaterial(annot.color));
-          overlay.userData.isFaceOverlay = true;
-          mesh.add(overlay);
-          state.faceOverlayMeshes.set(key, overlay);
-        }
-      }
+  // 未保存的选区：一个 box 包住当前选中的一组面
+  const selBox = computeWorldBoxFromSelection();
+  if (selBox) {
+    const mesh = createBoxMeshFromWorldBox(selBox, highlightColor, state.overlayOpacity);
+    state.annotationBoxGroup.add(mesh);
+  }
+
+  // 每个标注的每个 target 一个 box，颜色与透明度用标注的 UI 设置
+  state.annotations.forEach((annot) => {
+    if (state.hiddenAnnotationIds.has(annot.id)) return;
+    ensureWorldBoxesForAnnotation(annot);
+    const color = annot.color || '#FF9900';
+    annot.targets?.forEach((t) => {
+      if (!t.worldBox) return;
+      const boxMesh = createBoxMeshFromWorldBox(t.worldBox, color, state.overlayOpacity);
+      state.annotationBoxGroup.add(boxMesh);
     });
   });
 }
@@ -1229,7 +1329,13 @@ function addAnnotation() {
   const color = document.getElementById('annot-color').value;
   const targets = [];
   state.selectedTargets.forEach((faceIndices, meshId) => {
-    targets.push({ meshId, faceIndices: faceIndices && faceIndices.length > 0 ? [...faceIndices] : undefined });
+    const faceList = faceIndices && faceIndices.length > 0 ? [...faceIndices] : undefined;
+    const worldBox = computeWorldBoxForTarget(meshId, faceList);
+    targets.push({
+      meshId,
+      faceIndices: faceList,
+      worldBox: worldBox || undefined,
+    });
   });
   if (targets.length === 0) return;
 
@@ -1274,9 +1380,11 @@ function mergeTargetsIntoAnnotation(annot, newTargets) {
       }
     }
   });
-  annot.targets = Array.from(targetMap.entries()).map(([meshId, faceIndices]) =>
-    ({ meshId, faceIndices: faceIndices && faceIndices.length > 0 ? faceIndices : undefined })
-  );
+  annot.targets = Array.from(targetMap.entries()).map(([meshId, faceIndices]) => {
+    const faceList = faceIndices && faceIndices.length > 0 ? faceIndices : undefined;
+    const worldBox = computeWorldBoxForTarget(meshId, faceList);
+    return { meshId, faceIndices: faceList, worldBox: worldBox || undefined };
+  });
 }
 
 function addToAnnotation() {
@@ -1290,6 +1398,7 @@ function addToAnnotation() {
   });
   if (targets.length === 0) return;
   mergeTargetsIntoAnnotation(annot, targets);
+  ensureWorldBoxesForAnnotation(annot);
   updateAnnotationList();
   updateHighlight();
 }
@@ -1856,6 +1965,9 @@ async function init() {
 
   state.scene = new THREE.Scene();
   state.scene.background = new THREE.Color(0x1a1a1a);
+  state.annotationBoxGroup = new THREE.Group();
+  state.annotationBoxGroup.name = 'annotationBoxes';
+  state.scene.add(state.annotationBoxGroup);
 
   const size = getCanvasSize(canvas);
   state.camera = new THREE.PerspectiveCamera(60, size.width / size.height, 0.1, 1000);
