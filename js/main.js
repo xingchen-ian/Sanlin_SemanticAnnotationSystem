@@ -227,15 +227,6 @@ function syncTilesetMeshes() {
   });
 }
 
-// ----- 根据 tileset URL 生成稳定 modelId，便于 3D Tiles 标注保存/加载到 API -----
-function getTilesetModelId(tilesetUrl) {
-  if (!tilesetUrl || typeof tilesetUrl !== 'string') return null;
-  let h = 0;
-  const s = tilesetUrl.split('?')[0];
-  for (let i = 0; i < s.length; i++) h = ((h << 5) - h + s.charCodeAt(i)) | 0;
-  return 'tileset_' + Math.abs(h).toString(36);
-}
-
 // ----- 解析 tileset URL：同源时若 404 则尝试 /public/ 与根路径互换（兼容不同部署方式） -----
 function resolveTilesetUrl(inputUrl) {
   let url = inputUrl?.trim();
@@ -1877,7 +1868,11 @@ async function saveAnnotationsToApi() {
     return;
   }
   if (!modelId) {
-    setPersistStatus('请先加载模型（示例建筑或 3D Tiles）', true);
+    if (state.tilesetUrl) {
+      setPersistStatus('3D Tiles 标注暂不支持保存到服务器（需 UUID 模型 ID），请使用「导出标注」保存为 JSON', true);
+    } else {
+      setPersistStatus('请先从模型列表加载示例建筑', true);
+    }
     return;
   }
   if (!state.session?.access_token) {
@@ -2112,7 +2107,7 @@ async function init() {
       clearModel(state.scene);
       unsubscribePusher();
       await loadTileset(url);
-      state.currentModelId = getTilesetModelId(state.tilesetUrl);
+      state.currentModelId = null; // 后端 modelId 为 UUID，3D Tiles 标注请用「导出标注」保存
       updateAnnotationList();
       updateSelectionUI();
     } catch (err) {
