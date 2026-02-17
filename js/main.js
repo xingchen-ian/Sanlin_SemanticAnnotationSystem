@@ -1031,23 +1031,20 @@ function updateCalloutOverlay() {
     if (state.hiddenAnnotationIds.has(annot.id)) return;
     const anchors = getAnnotationAnchorPoints(annot);
     if (anchors.length === 0) return;
-    // 用第一个锚点决定标签位置与左右方向，所有引线汇聚到同一标签
-    proj.copy(anchors[0]).project(state.camera);
-    if (proj.z > 1 || proj.z < -1) return;
-    const firstPx = (proj.x + 1) / 2 * canvas.width;
-    const firstPy = (1 - proj.y) / 2 * canvas.height;
-    const dx = firstPx < canvas.width / 2 ? -1 : 1;
-    const tx = firstPx + dx * LINE_LENGTH * cos45;
-    const ty = firstPy - LINE_LENGTH * sin45;
-
     const label = annot.label || '未命名';
     ctx.font = FONT;
+    ctx.fillStyle = '#ffffff';
+    ctx.textBaseline = 'middle';
 
+    // 每个 target 一条引线 + 自己的文字（内容相同，位置在各自引线末端）
     anchors.forEach((worldAnchor) => {
       proj.copy(worldAnchor).project(state.camera);
       if (proj.z > 1 || proj.z < -1) return;
       const px = (proj.x + 1) / 2 * canvas.width;
       const py = (1 - proj.y) / 2 * canvas.height;
+      const dx = px < canvas.width / 2 ? -1 : 1;
+      const tx = px + dx * LINE_LENGTH * cos45;
+      const ty = py - LINE_LENGTH * sin45;
       const vx = tx - px;
       const vy = ty - py;
       const cp1x = px + 0.35 * vx;
@@ -1060,12 +1057,9 @@ function updateCalloutOverlay() {
       ctx.moveTo(px, py);
       ctx.bezierCurveTo(cp1x, cp1y, cp2x, cp2y, tx, ty);
       ctx.stroke();
+      ctx.textAlign = dx > 0 ? 'left' : 'right';
+      ctx.fillText(label, tx + (dx > 0 ? 4 : -4), ty);
     });
-
-    ctx.fillStyle = '#ffffff';
-    ctx.textBaseline = 'middle';
-    ctx.textAlign = dx > 0 ? 'left' : 'right';
-    ctx.fillText(label, tx + (dx > 0 ? 4 : -4), ty);
   });
 }
 
