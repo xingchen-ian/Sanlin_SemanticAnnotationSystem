@@ -1078,13 +1078,16 @@ function updateCalloutOverlay() {
     if (state.hiddenAnnotationIds.has(annot.id)) return;
     const anchors = getAnnotationAnchorPoints(annot);
     if (anchors.length === 0) return;
-    const label = annot.label || '未命名';
+    const defaultLabel = annot.label || '未命名';
     ctx.font = FONT;
     ctx.fillStyle = '#ffffff';
     ctx.textBaseline = 'middle';
 
-    // 每个 target 一条引线 + 自己的文字（内容相同，位置在各自引线末端）
-    anchors.forEach((worldAnchor) => {
+    // 每个 target 一条引线 + 自己的文字（可设子标注单独标签，否则用该类标注的标签）
+    anchors.forEach((worldAnchor, i) => {
+      const text = (annot.targets?.[i]?.label != null && String(annot.targets[i].label).trim() !== '')
+        ? String(annot.targets[i].label).trim()
+        : defaultLabel;
       proj.copy(worldAnchor).project(state.camera);
       if (proj.z > 1 || proj.z < -1) return;
       const px = (proj.x + 1) / 2 * canvas.width;
@@ -1105,7 +1108,7 @@ function updateCalloutOverlay() {
       ctx.bezierCurveTo(cp1x, cp1y, cp2x, cp2y, tx, ty);
       ctx.stroke();
       ctx.textAlign = dx > 0 ? 'left' : 'right';
-      ctx.fillText(label, tx + (dx > 0 ? 4 : -4), ty);
+      ctx.fillText(text, tx + (dx > 0 ? 4 : -4), ty);
     });
   });
 }
@@ -1225,12 +1228,26 @@ function updateAnnotationList() {
   const editingIndex = state.editingIndex;
   ul.innerHTML = state.annotations.map((a, i) => {
     if (editingIndex === i) {
+      const targets = a.targets || [];
+      const subItems = targets.map((t, ti) => {
+        const subLabel = (t.label != null ? String(t.label) : '').replace(/"/g, '&quot;');
+        return `
+          <div class="annot-sub-item" data-target-index="${ti}">
+            <span class="annot-sub-title">子标注 ${ti + 1}</span>
+            <input type="text" class="annot-edit-sub-label" data-target-index="${ti}" value="${subLabel}" placeholder="留空则用上方标签" />
+            <button type="button" class="btn-delete-target" data-target-index="${ti}" title="删除此框">删除此框</button>
+          </div>`;
+      }).join('');
       return `
         <li class="annot-item editing" data-index="${i}">
           <div class="annot-edit-form">
+            <label class="annot-edit-field-label">标签（该类标注默认）</label>
             <input type="text" class="annot-edit-label" value="${(a.label || '').replace(/"/g, '&quot;')}" placeholder="标签" />
+            <label class="annot-edit-field-label">分类</label>
             <input type="text" class="annot-edit-category" value="${(a.category || '').replace(/"/g, '&quot;')}" placeholder="分类" />
+            <label class="annot-edit-field-label">颜色</label>
             <input type="color" class="annot-edit-color" value="${a.color || '#FF9900'}" />
+            ${targets.length ? `<label class="annot-edit-field-label">子标注（每个 box 可单独设文案、可删除）</label><div class="annot-sub-list">${subItems}</div>` : ''}
             <div class="annot-edit-actions">
               <button type="button" class="btn-save-edit">保存</button>
               <button type="button" class="btn-cancel-edit">取消</button>
@@ -1268,11 +1285,22 @@ function updateAnnotationList() {
         const label = li.querySelector('.annot-edit-label').value.trim() || '未命名';
         const category = li.querySelector('.annot-edit-category').value.trim() || '';
         const color = li.querySelector('.annot-edit-color').value;
-        saveEditAnnotation(idx, { label, category, color });
+        const subLabels = [];
+        li.querySelectorAll('.annot-edit-sub-label').forEach((input) => {
+          const ti = parseInt(input.dataset.targetIndex, 10);
+          subLabels[ti] = input.value.trim();
+        });
+        saveEditAnnotation(idx, { label, category, color, targetLabels: subLabels });
       });
       cancelBtn?.addEventListener('click', () => {
         state.editingIndex = null;
         updateAnnotationList();
+      });
+      li.querySelectorAll('.btn-delete-target').forEach((btn) => {
+        btn.addEventListener('click', () => {
+          const ti = parseInt(btn.dataset.targetIndex, 10);
+          removeAnnotationTarget(idx, ti);
+        });
       });
       return;
     }
@@ -1314,12 +1342,26 @@ function updateAnnotationList() {
   });
 }
 
-async function saveEditAnnotation(idx, { label, category, color }) {
+function removeAnnotationTarget(annotIndex, targetIndex) {
+  const a = state.annotations[annotIndex];
+  if (!a?.targets?.length || targetIndex < 0 || targetIndex >= a.targets.length) return;
+  a.targets.splice(targetIndex, 1);
+  updateAnnotationList();
+  updateHighlight();
+  updateCalloutOverlay();
+}
+
+async function saveEditAnnotation(idx, { label, category, color, targetLabels }) {
   const a = state.annotations[idx];
   if (!a) return;
   a.label = label;
   a.category = category;
   a.color = color;
+  if (Array.isArray(targetLabels) && a.targets) {
+    a.targets.forEach((t, i) => {
+      t.label = targetLabels[i] !== undefined ? (targetLabels[i] || undefined) : t.label;
+    });
+  }
   state.editingIndex = null;
 
   const base = getApiUrl();

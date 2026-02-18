@@ -664,6 +664,64 @@ button:hover {
   border-radius: 4px;
 }
 
+.annot-edit-field-label {
+  display: block;
+  font-size: 11px;
+  color: #888;
+  margin-top: 8px;
+  margin-bottom: 2px;
+}
+
+.annot-edit-field-label:first-child {
+  margin-top: 0;
+}
+
+.annot-sub-list {
+  margin-top: 6px;
+  margin-bottom: 8px;
+}
+
+.annot-sub-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+  padding: 4px 0;
+  border-bottom: 1px solid #333;
+}
+
+.annot-sub-item:last-child {
+  border-bottom: none;
+}
+
+.annot-sub-title {
+  font-size: 11px;
+  color: #888;
+  min-width: 56px;
+}
+
+.annot-edit-sub-label {
+  flex: 1;
+  min-width: 0;
+  padding: 4px 6px;
+  font-size: 12px;
+}
+
+.btn-delete-target {
+  flex-shrink: 0;
+  padding: 4px 8px;
+  font-size: 11px;
+  background: #552222;
+  border: 1px solid #663333;
+  color: #f88;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.btn-delete-target:hover {
+  background: #663333;
+}
+
 .annot-edit-actions {
   display: flex;
   gap: 8px;
