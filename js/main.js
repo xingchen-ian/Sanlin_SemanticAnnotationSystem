@@ -57,6 +57,7 @@ const state = {
   dirLight: null,               // 主方向光
   fillLight: null,              // 补光
   annotationBoxGroup: null,     // 标注与选区的半透明 box 容器（世界坐标），加入 scene
+  hoveredAnnotationTarget: null, // { annotIndex, targetIndex } 悬停编辑面板子标注时高亮场景中对应 box/引线
 };
 
 const supabase = (() => {
@@ -1074,17 +1075,20 @@ function updateCalloutOverlay() {
   const cos45 = Math.cos(ANGLE);
   const sin45 = Math.sin(ANGLE);
 
-  state.annotations.forEach((annot) => {
+  const hovered = state.hoveredAnnotationTarget;
+  state.annotations.forEach((annot, annotIndex) => {
     if (state.hiddenAnnotationIds.has(annot.id)) return;
     const anchors = getAnnotationAnchorPoints(annot);
     if (anchors.length === 0) return;
     const defaultLabel = annot.label || '未命名';
     ctx.font = FONT;
-    ctx.fillStyle = '#ffffff';
     ctx.textBaseline = 'middle';
 
-    // 每个 target 一条引线 + 自己的文字（可设子标注单独标签，否则用该类标注的标签）
     anchors.forEach((worldAnchor, i) => {
+      const isHovered = hovered && hovered.annotIndex === annotIndex && hovered.targetIndex === i;
+      ctx.strokeStyle = isHovered ? '#ffcc00' : '#ffffff';
+      ctx.lineWidth = isHovered ? 2.5 : 1.5;
+      ctx.fillStyle = isHovered ? '#ffcc00' : '#ffffff';
       const text = (annot.targets?.[i]?.label != null && String(annot.targets[i].label).trim() !== '')
         ? String(annot.targets[i].label).trim()
         : defaultLabel;
@@ -1101,8 +1105,6 @@ function updateCalloutOverlay() {
       const cp1y = py + 0.35 * vy - S_CURVE_AMPLITUDE * cos45;
       const cp2x = px + 0.65 * vx;
       const cp2y = py + 0.65 * vy + S_CURVE_AMPLITUDE * cos45;
-      ctx.strokeStyle = '#ffffff';
-      ctx.lineWidth = 1.5;
       ctx.beginPath();
       ctx.moveTo(px, py);
       ctx.bezierCurveTo(cp1x, cp1y, cp2x, cp2y, tx, ty);
@@ -1155,14 +1157,16 @@ function updateHighlight() {
     state.annotationBoxGroup.add(mesh);
   }
 
-  // 每个标注的每个 target 一个 box，颜色与透明度用标注的 UI 设置
-  state.annotations.forEach((annot) => {
+  const hovered = state.hoveredAnnotationTarget;
+  state.annotations.forEach((annot, annotIndex) => {
     if (state.hiddenAnnotationIds.has(annot.id)) return;
     ensureWorldBoxesForAnnotation(annot);
-    const color = annot.color || '#FF9900';
-    annot.targets?.forEach((t) => {
+    const baseColor = annot.color || '#FF9900';
+    annot.targets?.forEach((t, ti) => {
       if (!t.worldBox) return;
-      const boxMesh = createBoxMeshFromWorldBox(t.worldBox, color, state.overlayOpacity);
+      const isHovered = hovered && hovered.annotIndex === annotIndex && hovered.targetIndex === ti;
+      const color = isHovered ? '#ffffff' : baseColor;
+      const boxMesh = createBoxMeshFromWorldBox(t.worldBox, color, isHovered ? 0.7 : state.overlayOpacity);
       state.annotationBoxGroup.add(boxMesh);
     });
   });
@@ -1232,15 +1236,15 @@ function updateAnnotationList() {
       const subItems = targets.map((t, ti) => {
         const subLabel = (t.label != null ? String(t.label) : '').replace(/"/g, '&quot;');
         return `
-          <div class="annot-sub-item" data-target-index="${ti}">
+          <div class="annot-sub-item" data-annot-index="${i}" data-target-index="${ti}">
             <span class="annot-sub-title">子标注 ${ti + 1}</span>
             <input type="text" class="annot-edit-sub-label" data-target-index="${ti}" value="${subLabel}" placeholder="留空则用上方标签" />
-            <button type="button" class="btn-delete-target" data-target-index="${ti}" title="删除此框">删除此框</button>
+            <button type="button" class="btn-delete-target" data-target-index="${ti}" title="删除此框">删除</button>
           </div>`;
       }).join('');
       return `
         <li class="annot-item editing" data-index="${i}">
-          <div class="annot-edit-form">
+          <div class="annot-edit-form" data-index="${i}">
             <label class="annot-edit-field-label">标签（该类标注默认）</label>
             <input type="text" class="annot-edit-label" value="${(a.label || '').replace(/"/g, '&quot;')}" placeholder="标签" />
             <label class="annot-edit-field-label">分类</label>
@@ -1279,6 +1283,9 @@ function updateAnnotationList() {
     if (!annot) return;
 
     if (state.editingIndex === idx) {
+      const form = li.querySelector('.annot-edit-form');
+      form?.addEventListener('mousedown', (e) => e.stopPropagation());
+      form?.addEventListener('click', (e) => e.stopPropagation());
       const saveBtn = li.querySelector('.btn-save-edit');
       const cancelBtn = li.querySelector('.btn-cancel-edit');
       saveBtn?.addEventListener('click', () => {
@@ -1294,12 +1301,30 @@ function updateAnnotationList() {
       });
       cancelBtn?.addEventListener('click', () => {
         state.editingIndex = null;
+        state.hoveredAnnotationTarget = null;
         updateAnnotationList();
+        updateHighlight();
+        updateCalloutOverlay();
       });
       li.querySelectorAll('.btn-delete-target').forEach((btn) => {
-        btn.addEventListener('click', () => {
+        btn.addEventListener('click', (e) => {
+          e.stopPropagation();
           const ti = parseInt(btn.dataset.targetIndex, 10);
           removeAnnotationTarget(idx, ti);
+        });
+      });
+      li.querySelectorAll('.annot-sub-item').forEach((row) => {
+        const ai = parseInt(row.dataset.annotIndex, 10);
+        const ti = parseInt(row.dataset.targetIndex, 10);
+        row.addEventListener('mouseenter', () => {
+          state.hoveredAnnotationTarget = { annotIndex: ai, targetIndex: ti };
+          updateHighlight();
+          updateCalloutOverlay();
+        });
+        row.addEventListener('mouseleave', () => {
+          state.hoveredAnnotationTarget = null;
+          updateHighlight();
+          updateCalloutOverlay();
         });
       });
       return;
@@ -1332,6 +1357,7 @@ function updateAnnotationList() {
     li.querySelector('.btn-edit-annot')?.addEventListener('click', (e) => {
       e.stopPropagation();
       state.editingIndex = idx;
+      state.hoveredAnnotationTarget = null;
       updateAnnotationList();
     });
 
@@ -1363,6 +1389,7 @@ async function saveEditAnnotation(idx, { label, category, color, targetLabels })
     });
   }
   state.editingIndex = null;
+  state.hoveredAnnotationTarget = null;
 
   const base = getApiUrl();
   const modelId = state.currentModelId;

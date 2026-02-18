@@ -709,7 +709,9 @@ button:hover {
 
 .btn-delete-target {
   flex-shrink: 0;
-  padding: 4px 8px;
+  width: auto;
+  min-width: 44px;
+  padding: 2px 6px;
   font-size: 11px;
   background: #552222;
   border: 1px solid #663333;
