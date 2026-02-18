@@ -53,7 +53,6 @@ const state = {
   selectionHighLOD: false,     // 为面选择强制使用最高精度 LOD（errorTarget 临时调小），便于在精细几何上选面标注
   tilesetUrl: null,             // 当前加载的 tileset 根 URL（不含 cache bust），用于检查倾斜
   tilesetMaterialOpacity: 1,    // 3D Tiles 材质透明度 0~1，由滑条调节
-  tilesetMaterialSaturation: 1,  // 3D Tiles 材质饱和度倍数，0=灰 1=原色 >1=更艳，由滑条调节
   ambientLight: null,           // 环境光，供 UI 调节 intensity
   dirLight: null,               // 主方向光
   fillLight: null,              // 补光
@@ -227,32 +226,21 @@ function syncTilesetMeshes() {
     const raw = obj.material;
     const mats = Array.isArray(raw) ? raw : [raw];
     const cloned = mats.map((m) => m?.clone?.() ?? new THREE.MeshStandardMaterial({ color: 0x888888 }));
-    const firstColor = cloned[0]?.color;
-    const baseColor = firstColor?.clone?.() ?? new THREE.Color(0x888888);
-    state.meshes.push({ mesh: obj, meshId, originalMaterial: cloned.length === 1 ? cloned[0] : cloned, baseColor });
+    state.meshes.push({ mesh: obj, meshId, originalMaterial: cloned.length === 1 ? cloned[0] : cloned });
   });
 }
 
-// ----- 3D Tiles：将透明度与饱和度应用到当前 tile 材质（仅修改库的材质属性，不替换材质，避免整块不显示） -----
+// ----- 3D Tiles：将透明度应用到当前 tile 材质（仅修改库的材质属性，不替换材质） -----
 function applyTilesetMaterialSettings() {
   if (!state.tilesetRoot) return;
   const opacity = Math.max(0, Math.min(1, state.tilesetMaterialOpacity));
-  const sat = Math.max(0, Math.min(3, state.tilesetMaterialSaturation));
   state.tilesetRoot.traverse((obj) => {
     if (!obj.isMesh || !obj.material) return;
-    const entry = state.meshes.find((m) => m.mesh === obj);
     const mats = Array.isArray(obj.material) ? obj.material : [obj.material];
-    const baseColor = entry?.baseColor ?? entry?.originalMaterial?.color;
     mats.forEach((mat) => {
       if (!mat) return;
       mat.transparent = opacity < 1;
       mat.opacity = opacity;
-      if (mat.color && baseColor) {
-        const hsl = { h: 0, s: 0, l: 0 };
-        baseColor.getHSL(hsl);
-        hsl.s *= sat;
-        mat.color.setHSL(hsl.h, Math.min(1, hsl.s), hsl.l);
-      }
     });
   });
 }
@@ -2228,22 +2216,12 @@ async function init() {
   (function initTilesetMaterialControls() {
     const opacityEl = document.getElementById('tileset-material-opacity');
     const opacityValueEl = document.getElementById('tileset-material-opacity-value');
-    const satEl = document.getElementById('tileset-material-saturation');
-    const satValueEl = document.getElementById('tileset-material-saturation-value');
     if (opacityEl && opacityValueEl) {
       opacityEl.value = String(state.tilesetMaterialOpacity);
       opacityValueEl.textContent = Math.round(state.tilesetMaterialOpacity * 100) + '%';
       opacityEl.addEventListener('input', () => {
         state.tilesetMaterialOpacity = parseFloat(opacityEl.value);
         opacityValueEl.textContent = Math.round(state.tilesetMaterialOpacity * 100) + '%';
-      });
-    }
-    if (satEl && satValueEl) {
-      satEl.value = String(state.tilesetMaterialSaturation);
-      satValueEl.textContent = Math.round(state.tilesetMaterialSaturation * 100) + '%';
-      satEl.addEventListener('input', () => {
-        state.tilesetMaterialSaturation = parseFloat(satEl.value);
-        satValueEl.textContent = Math.round(state.tilesetMaterialSaturation * 100) + '%';
       });
     }
   })();
