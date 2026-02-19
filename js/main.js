@@ -1342,10 +1342,13 @@ function updateAnnotationList() {
       const targets = a.targets || [];
       const subItems = targets.map((t, ti) => {
         const subLabel = (t.label != null ? String(t.label) : '').replace(/"/g, '&quot;');
+        const subDesc = (t.description != null ? String(t.description) : '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
         return `
           <div class="annot-sub-item" data-annot-index="${i}" data-target-index="${ti}">
             <span class="annot-sub-title">子标注 ${ti + 1}</span>
             <input type="text" class="annot-edit-sub-label" data-target-index="${ti}" value="${subLabel}" placeholder="留空则用上方标签" />
+            <label class="annot-edit-field-label">描述（500字以内）</label>
+            <textarea class="annot-edit-sub-description" data-target-index="${ti}" maxlength="500" rows="2" placeholder="描述该区域包含的模型结构">${subDesc}</textarea>
             <button type="button" class="btn-delete-target" data-target-index="${ti}" title="删除此框">删除</button>
           </div>`;
       }).join('');
@@ -1358,9 +1361,7 @@ function updateAnnotationList() {
             <input type="text" class="annot-edit-category" value="${(a.category || '').replace(/"/g, '&quot;')}" placeholder="分类" />
             <label class="annot-edit-field-label">颜色</label>
             <input type="color" class="annot-edit-color" value="${a.color || '#FF9900'}" />
-            <label class="annot-edit-field-label">描述（500字以内）</label>
-            <textarea class="annot-edit-description" maxlength="500" rows="2" placeholder="描述该区域包含的模型结构">${(a.description || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')}</textarea>
-            ${targets.length ? `<label class="annot-edit-field-label">子标注（每个 box 可单独设文案、可删除）</label><div class="annot-sub-list">${subItems}</div>` : ''}
+            ${targets.length ? `<label class="annot-edit-field-label">子标注（每个 box 可单独设文案、描述、可删除）</label><div class="annot-sub-list">${subItems}</div>` : ''}
             <div class="annot-edit-actions">
               <button type="button" class="btn-save-edit">保存</button>
               <button type="button" class="btn-cancel-edit">取消</button>
@@ -1401,14 +1402,17 @@ function updateAnnotationList() {
         const label = li.querySelector('.annot-edit-label').value.trim() || '未命名';
         const category = li.querySelector('.annot-edit-category').value.trim() || '';
         const color = li.querySelector('.annot-edit-color').value;
-        const descEl = li.querySelector('.annot-edit-description');
-        const description = descEl ? String(descEl.value || '').slice(0, 500) : '';
         const subLabels = [];
         li.querySelectorAll('.annot-edit-sub-label').forEach((input) => {
           const ti = parseInt(input.dataset.targetIndex, 10);
           subLabels[ti] = input.value.trim();
         });
-        saveEditAnnotation(idx, { label, category, color, description, targetLabels: subLabels });
+        const targetDescriptions = [];
+        li.querySelectorAll('.annot-edit-sub-description').forEach((textarea) => {
+          const ti = parseInt(textarea.dataset.targetIndex, 10);
+          targetDescriptions[ti] = String(textarea.value || '').slice(0, 500);
+        });
+        saveEditAnnotation(idx, { label, category, color, targetLabels: subLabels, targetDescriptions });
       });
       cancelBtn?.addEventListener('click', () => {
         state.editingIndex = null;
@@ -1488,16 +1492,20 @@ function removeAnnotationTarget(annotIndex, targetIndex) {
   updateCalloutOverlay();
 }
 
-async function saveEditAnnotation(idx, { label, category, color, description, targetLabels }) {
+async function saveEditAnnotation(idx, { label, category, color, targetLabels, targetDescriptions }) {
   const a = state.annotations[idx];
   if (!a) return;
   a.label = label;
   a.category = category;
   a.color = color;
-  if (description !== undefined) a.description = String(description).slice(0, 500);
   if (Array.isArray(targetLabels) && a.targets) {
     a.targets.forEach((t, i) => {
-      t.label = targetLabels[i] !== undefined ? (targetLabels[i] || undefined) : t.label;
+      if (targetLabels[i] !== undefined) t.label = targetLabels[i] || undefined;
+    });
+  }
+  if (Array.isArray(targetDescriptions) && a.targets) {
+    a.targets.forEach((t, i) => {
+      if (targetDescriptions[i] !== undefined) t.description = String(targetDescriptions[i]).slice(0, 500);
     });
   }
   state.editingIndex = null;
@@ -1505,8 +1513,7 @@ async function saveEditAnnotation(idx, { label, category, color, description, ta
 
   const base = getApiUrl();
   const modelId = state.currentModelId;
-  const patchBody = { label, category, color };
-  if (description !== undefined) patchBody.description = String(description).slice(0, 500);
+  const patchBody = { label, category, color, targets: a.targets };
   if (base && modelId && isServerId(a.id)) {
     try {
       await fetch(`${base}/api/models/${modelId}/annotations/${a.id}`, {
@@ -1556,14 +1563,13 @@ function addAnnotation() {
 
   if (state.annotationMode === 'worldbox') {
     if (!state.drawingBox) return;
-    const targets = [{ worldBox: { min: [...state.drawingBox.min], max: [...state.drawingBox.max] } }];
+    const targets = [{ worldBox: { min: [...state.drawingBox.min], max: [...state.drawingBox.max] }, description }];
     const annot = {
       id: `annot_${Date.now()}`,
       targets,
       label,
       category,
       color,
-      description,
       createdAt: Date.now(),
     };
     state.annotations.push(annot);
@@ -1590,6 +1596,7 @@ function addAnnotation() {
     meshId: firstMeshId,
     faceIndices: faceList,
     worldBox: worldBox || undefined,
+    description,
   }];
 
   const annot = {
@@ -1598,7 +1605,6 @@ function addAnnotation() {
     label,
     category,
     color,
-    description,
     createdAt: Date.now(),
   };
   state.annotations.push(annot);
@@ -1651,10 +1657,14 @@ function addToAnnotation() {
 
   if (state.annotationMode === 'worldbox') {
     if (!state.drawingBox) return;
-    const oneTarget = { worldBox: { min: [...state.drawingBox.min], max: [...state.drawingBox.max] } };
+    const descriptionEl = document.getElementById('annot-description');
+    const description = descriptionEl ? String(descriptionEl.value || '').slice(0, 500) : '';
+    const oneTarget = { worldBox: { min: [...state.drawingBox.min], max: [...state.drawingBox.max] }, description };
     annot.targets = (annot.targets || []).concat(oneTarget);
     state.drawingBox = null;
     state.drawingBoxFirstPoint = null;
+    const descEl = document.getElementById('annot-description');
+    if (descEl) descEl.value = '';
     updateAnnotationList();
     updateHighlight();
     updateSelectionUI();
@@ -1668,11 +1678,14 @@ function addToAnnotation() {
   const faceList = firstFaceIndices == null
     ? undefined
     : (Array.isArray(firstFaceIndices) && firstFaceIndices.length > 0 ? [...firstFaceIndices] : undefined);
+  const descriptionEl = document.getElementById('annot-description');
+  const description = descriptionEl ? String(descriptionEl.value || '').slice(0, 500) : '';
 
   const oneTarget = {
     meshId: firstMeshId,
     faceIndices: faceList,
     worldBox: worldBox || undefined,
+    description,
   };
   annot.targets = (annot.targets || []).concat(oneTarget);
   updateAnnotationList();
@@ -1808,13 +1821,16 @@ async function handleLogout() {
 
 // ----- Pusher 实时同步 -----
 function apiToAnnot(a) {
+  const targets = (a.targets || []).map((t) => ({
+    ...t,
+    description: t.description != null ? String(t.description).slice(0, 500) : '',
+  }));
   return {
     id: a.id,
-    targets: a.targets || [],
+    targets,
     label: a.label || '未命名',
     category: a.category || '',
     color: a.color || '#FF9900',
-    description: a.description != null ? String(a.description).slice(0, 500) : '',
     createdAt: a.created_at ? new Date(a.created_at).getTime() : Date.now(),
   };
 }
@@ -2117,15 +2133,7 @@ async function loadAnnotationsFromApi() {
       return;
     }
     const data = await r.json();
-    state.annotations = (data || []).map((a) => ({
-      id: a.id,
-      targets: a.targets || [],
-      label: a.label || '未命名',
-      category: a.category || '',
-      color: a.color || '#FF9900',
-      description: a.description != null ? String(a.description).slice(0, 500) : '',
-      createdAt: a.created_at ? new Date(a.created_at).getTime() : Date.now(),
-    }));
+    state.annotations = (data || []).map(apiToAnnot);
     updateAnnotationList();
     updateHighlight();
     setPersistStatus(`已加载 ${state.annotations.length} 条标注`);
@@ -2163,7 +2171,6 @@ async function saveAnnotationsToApi() {
       category: a.category,
       color: a.color,
       author,
-      ...(a.description !== undefined && { description: String(a.description).slice(0, 500) }),
     }));
     const r = await fetch(`${base}/api/models/${modelId}/annotations`, {
       method: 'PUT',
@@ -2180,15 +2187,7 @@ async function saveAnnotationsToApi() {
     }
     if (!r.ok) throw new Error(await r.text());
     const data = await r.json();
-    state.annotations = (data || []).map((a) => ({
-      id: a.id,
-      targets: a.targets || [],
-      label: a.label || '未命名',
-      category: a.category || '',
-      color: a.color || '#FF9900',
-      description: a.description != null ? String(a.description).slice(0, 500) : '',
-      createdAt: a.created_at ? new Date(a.created_at).getTime() : Date.now(),
-    }));
+    state.annotations = (data || []).map(apiToAnnot);
     state.editingIndex = null;
     updateAnnotationList();
     updateHighlight();
@@ -2210,7 +2209,6 @@ function exportAnnotations() {
       label: a.label || '未命名',
       category: a.category || '',
       color: a.color || '#FF9900',
-      description: a.description != null ? String(a.description).slice(0, 500) : '',
       createdAt: a.createdAt != null ? a.createdAt : Date.now(),
     })),
   };

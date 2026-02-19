@@ -175,7 +175,6 @@ app.put('/api/models/:modelId/annotations', requireAuth, async (req, res) => {
     category: a.category || '',
     color: a.color || '#FF9900',
     author: a.author || '',
-    ...(a.description !== undefined && { description: String(a.description).slice(0, 500) }),
   }));
   const { data, error } = await supabase.from('annotations').insert(rows).select();
   if (error) return res.status(500).json({ error: error.message });
@@ -186,13 +185,12 @@ app.put('/api/models/:modelId/annotations', requireAuth, async (req, res) => {
 app.patch('/api/models/:modelId/annotations/:id', requireAuth, async (req, res) => {
   if (!supabase) return res.status(503).json({ error: 'Supabase not configured' });
   const { modelId, id } = req.params;
-  const { label, category, color, targets, description } = req.body;
+  const { label, category, color, targets } = req.body;
   const updates = {};
   if (label !== undefined) updates.label = label;
   if (category !== undefined) updates.category = category;
   if (color !== undefined) updates.color = color;
   if (targets !== undefined) updates.targets = targets;
-  if (description !== undefined) updates.description = String(description).slice(0, 500);
   if (Object.keys(updates).length === 0) return res.status(400).json({ error: 'No fields to update' });
   const { data, error } = await supabase
     .from('annotations')
@@ -225,7 +223,7 @@ app.delete('/api/models/:modelId/annotations/:id', requireAuth, async (req, res)
 app.post('/api/models/:modelId/annotations', requireAuth, async (req, res) => {
   if (!supabase) return res.status(503).json({ error: 'Supabase not configured' });
   const { modelId } = req.params;
-  const { targets, label, category, color, author, layer_id, description } = req.body;
+  const { targets, label, category, color, author, layer_id } = req.body;
   const body = {
     model_id: modelId,
     targets: targets || [],
@@ -234,7 +232,6 @@ app.post('/api/models/:modelId/annotations', requireAuth, async (req, res) => {
     color: color || '#FF9900',
     author: author || '',
     ...(layer_id && { layer_id }),
-    ...(description !== undefined && { description: String(description).slice(0, 500) }),
   };
   const { data, error } = await supabase.from('annotations').insert(body).select().single();
   if (error) return res.status(500).json({ error: error.message });
