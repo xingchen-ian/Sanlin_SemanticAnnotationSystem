@@ -65,12 +65,14 @@ const state = {
   drawingBoxFirstPoint: null,   // 绘制时第一个角点（世界坐标），第二次点击/拖拽定对角
   // WorldBox 编辑（Phase3 新建阶段 / Phase4 二次编辑）
   editingBox: null,             // null | { type: 'drawing' } | { type: 'annotation', annotIndex, targetIndex }
-  boxEditMode: 'translate',     // 'translate' | 'rotate' | 'vertex'
+  boxEditMode: 'translate',     // 'translate' | 'rotate' | 'vertex' | 'face'
   editingVertexIndex: null,     // 0..7 顶点拖拽时当前选中的顶点
+  editingFaceIndex: null,       // 0..5 面拖拽时当前选中的面 (0=minX,1=maxX,2=minY,3=maxY,4=minZ,5=maxZ)
   transformControls: null,      // TransformControls 实例
   boxEditProxy: null,           // 整体移动/旋转用的 Group（中心 + 可选 box 子节点用于旋转后取 AABB）
   vertexHandlesGroup: null,     // 8 个顶点手柄的 Group，仅顶点模式时存在
-  boxEditGroup: null,           // 容纳 proxy、vertexHandles、transformControls 的容器，不参与 updateHighlight 清空
+  faceHandlesGroup: null,       // 6 个面手柄的 Group，仅面模式时存在
+  boxEditGroup: null,           // 容纳 proxy、vertexHandles、faceHandles、transformControls 的容器
 };
 
 const supabase = (() => {
@@ -940,10 +942,81 @@ function getWorldBoxFromVertexHandles(vertexHandlesGroup, draggedVertexIndex, dr
   return worldBoxToUnified({ min: box3.min.toArray(), max: box3.max.toArray() });
 }
 
+// ----- 面手柄：6 个面中心，拖拽沿法线改变 box 尺寸；userData.faceIndex 0..5 (minX,maxX,minY,maxY,minZ,maxZ) -----
+function getFaceCenters(worldBoxUnified) {
+  if (!worldBoxUnified) return [];
+  const c = worldBoxUnified.center;
+  const h = worldBoxUnified.halfExtents;
+  const q = new THREE.Quaternion(worldBoxUnified.quaternion[0], worldBoxUnified.quaternion[1], worldBoxUnified.quaternion[2], worldBoxUnified.quaternion[3]);
+  const center = new THREE.Vector3(c[0], c[1], c[2]);
+  const localCenters = [
+    new THREE.Vector3(-h[0], 0, 0), new THREE.Vector3(h[0], 0, 0),
+    new THREE.Vector3(0, -h[1], 0), new THREE.Vector3(0, h[1], 0),
+    new THREE.Vector3(0, 0, -h[2]), new THREE.Vector3(0, 0, h[2]),
+  ];
+  return localCenters.map((p) => p.clone().applyQuaternion(q).add(center));
+}
+
+const FACE_NORMALS = [
+  new THREE.Vector3(-1, 0, 0), new THREE.Vector3(1, 0, 0),
+  new THREE.Vector3(0, -1, 0), new THREE.Vector3(0, 1, 0),
+  new THREE.Vector3(0, 0, -1), new THREE.Vector3(0, 0, 1),
+];
+
+function createFaceHandles(worldBoxUnified) {
+  const centers = worldBoxUnified ? getFaceCenters(worldBoxUnified) : [];
+  if (centers.length !== 6) return new THREE.Group();
+  const group = new THREE.Group();
+  const mat = new THREE.MeshBasicMaterial({ color: 0x00aaff, side: THREE.DoubleSide });
+  const geo = new THREE.PlaneGeometry(0.4, 0.4);
+  const lookTarget = new THREE.Vector3();
+  for (let i = 0; i < 6; i++) {
+    const mesh = new THREE.Mesh(geo.clone(), mat.clone());
+    mesh.position.copy(centers[i]);
+    lookTarget.copy(centers[i]).add(FACE_NORMALS[i]);
+    mesh.lookAt(lookTarget);
+    mesh.userData.faceIndex = i;
+    mesh.userData.isFaceHandle = true;
+    group.add(mesh);
+  }
+  return group;
+}
+
+function syncFaceHandlesFromWorldBox(group, worldBoxUnified, skipIndex = null) {
+  const centers = worldBoxUnified ? getFaceCenters(worldBoxUnified) : [];
+  if (centers.length !== 6) return;
+  group.children.forEach((mesh, i) => {
+    if (i === skipIndex) return;
+    if (centers[i]) mesh.position.copy(centers[i]);
+  });
+}
+
+const FACE_EPS = 0.01;
+/** 根据被拖拽面的新位置更新 worldBox（只改对应轴的那一侧），正负方向都生效 */
+function applyFacePositionToWorldBox(faceIndex, worldPos, worldBoxUnified) {
+  if (!worldBoxUnified) return worldBoxUnified;
+  const c = worldBoxUnified.center;
+  const h = worldBoxUnified.halfExtents;
+  const min = [c[0] - h[0], c[1] - h[1], c[2] - h[2]];
+  const max = [c[0] + h[0], c[1] + h[1], c[2] + h[2]];
+  const axis = faceIndex >> 1;   // 0=X, 1=Y, 2=Z
+  const isMax = (faceIndex & 1) === 1;
+  const v = axis === 0 ? worldPos.x : axis === 1 ? worldPos.y : worldPos.z;
+  if (isMax) {
+    max[axis] = v;
+    if (max[axis] < min[axis] + FACE_EPS) max[axis] = min[axis] + FACE_EPS;
+  } else {
+    min[axis] = v;
+    if (min[axis] > max[axis] - FACE_EPS) min[axis] = max[axis] - FACE_EPS;
+  }
+  return worldBoxToUnified({ min, max });
+}
+
 function enterBoxEdit(editingBox, mode = 'translate') {
   state.editingBox = editingBox;
   state.boxEditMode = mode;
   state.editingVertexIndex = null;
+  state.editingFaceIndex = null;
   const wb = getCurrentEditingWorldBox();
   if (!wb) return;
 
@@ -951,12 +1024,21 @@ function enterBoxEdit(editingBox, mode = 'translate') {
 
   if (mode === 'vertex') {
     disposeVertexHandles();
+    disposeFaceHandles();
     if (state.boxEditProxy && state.boxEditProxy.parent) state.boxEditProxy.parent.remove(state.boxEditProxy);
     state.vertexHandlesGroup = createVertexHandles(wb);
     state.boxEditGroup.add(state.vertexHandlesGroup);
     state.transformControls.detach();
+  } else if (mode === 'face') {
+    disposeVertexHandles();
+    disposeFaceHandles();
+    if (state.boxEditProxy && state.boxEditProxy.parent) state.boxEditProxy.parent.remove(state.boxEditProxy);
+    state.faceHandlesGroup = createFaceHandles(wb);
+    state.boxEditGroup.add(state.faceHandlesGroup);
+    state.transformControls.detach();
   } else {
     disposeVertexHandles();
+    disposeFaceHandles();
     if (!state.boxEditProxy) state.boxEditProxy = createBoxEditProxy();
     if (!state.boxEditProxy.parent) state.boxEditGroup.add(state.boxEditProxy);
     syncProxyFromWorldBox(state.boxEditProxy, wb);
@@ -978,15 +1060,27 @@ function disposeVertexHandles() {
   state.vertexHandlesGroup = null;
 }
 
+function disposeFaceHandles() {
+  if (!state.faceHandlesGroup) return;
+  state.faceHandlesGroup.traverse((c) => {
+    if (c.geometry) c.geometry.dispose();
+    if (c.material) c.material.dispose();
+  });
+  state.boxEditGroup.remove(state.faceHandlesGroup);
+  state.faceHandlesGroup = null;
+}
+
 function exitBoxEdit(persist = true) {
   const wasAnnotation = state.editingBox && state.editingBox.type === 'annotation';
   const annotIndex = wasAnnotation ? state.editingBox.annotIndex : null;
   state.transformControls.detach();
   if (state.boxEditProxy && state.boxEditProxy.parent) state.boxEditProxy.parent.remove(state.boxEditProxy);
   disposeVertexHandles();
+  disposeFaceHandles();
   state.editingBox = null;
   state.boxEditMode = 'translate';
   state.editingVertexIndex = null;
+  state.editingFaceIndex = null;
   updateBoxEditUI();
   updateHighlight();
   updateSelectionUI();
@@ -1035,7 +1129,7 @@ function handleWorldBoxClick(event) {
   state.mouse.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
   state.raycaster.setFromCamera(state.mouse, state.camera);
 
-  // 1) 若正在编辑顶点，先检测是否点到顶点手柄
+  // 1a) 若正在编辑顶点，先检测是否点到顶点手柄
   if (state.editingBox && state.boxEditMode === 'vertex' && state.vertexHandlesGroup) {
     const hitVertex = state.raycaster.intersectObjects(state.vertexHandlesGroup.children, true);
     if (hitVertex.length > 0) {
@@ -1049,13 +1143,30 @@ function handleWorldBoxClick(event) {
     }
   }
 
+  // 1b) 若正在编辑面，先检测是否点到面手柄
+  if (state.editingBox && state.boxEditMode === 'face' && state.faceHandlesGroup) {
+    const hitFace = state.raycaster.intersectObjects(state.faceHandlesGroup.children, true);
+    if (hitFace.length > 0) {
+      const idx = hitFace[0].object.userData.faceIndex;
+      state.editingFaceIndex = idx;
+      state.transformControls.setMode('translate');
+      state.transformControls.setSpace('world');
+      state.transformControls.attach(hitFace[0].object);
+      updateHighlight();
+      return;
+    }
+  }
+
   // 2) 若正在编辑且点到空白处：退出编辑
   if (state.editingBox) {
     const hitBox = state.raycaster.intersectObjects(state.annotationBoxGroup.children, true);
     const hitVertex = state.vertexHandlesGroup
       ? state.raycaster.intersectObjects(state.vertexHandlesGroup.children, true)
       : [];
-    const hitAny = hitBox.length > 0 || hitVertex.length > 0;
+    const hitFace = state.faceHandlesGroup
+      ? state.raycaster.intersectObjects(state.faceHandlesGroup.children, true)
+      : [];
+    const hitAny = hitBox.length > 0 || hitVertex.length > 0 || hitFace.length > 0;
     if (!hitAny) {
       exitBoxEdit(true);
       return;
@@ -2651,12 +2762,27 @@ async function init() {
           }
         });
       }
+    } else if (state.boxEditMode === 'face' && state.editingFaceIndex != null) {
+      const attached = state.transformControls.object;
+      if (attached?.userData?.isFaceHandle && state.faceHandlesGroup) {
+        const pos = attached.position.clone();
+        const wb = getCurrentEditingWorldBox();
+        if (wb) {
+          const next = applyFacePositionToWorldBox(state.editingFaceIndex, pos, wb);
+          setCurrentEditingWorldBox(next);
+          syncFaceHandlesFromWorldBox(state.faceHandlesGroup, next, state.editingFaceIndex);
+        }
+      }
     } else if (state.boxEditProxy && state.transformControls.object === state.boxEditProxy) {
       const next = getWorldBoxFromProxy(state.boxEditProxy);
       if (next) setCurrentEditingWorldBox(next);
       if (state.vertexHandlesGroup && state.editingBox) {
         const wb = getCurrentEditingWorldBox();
         if (wb) syncVertexHandlesFromWorldBox(state.vertexHandlesGroup, wb);
+      }
+      if (state.faceHandlesGroup && state.editingBox) {
+        const wb = getCurrentEditingWorldBox();
+        if (wb) syncFaceHandlesFromWorldBox(state.faceHandlesGroup, wb);
       }
     }
     updateHighlight();
@@ -2871,19 +2997,30 @@ async function init() {
       const mode = btn.dataset.boxEditMode;
       state.boxEditMode = mode;
       state.editingVertexIndex = null;
+      state.editingFaceIndex = null;
       state.transformControls.detach();
       const wb = getCurrentEditingWorldBox();
       if (!wb) return;
       if (mode === 'vertex') {
         disposeVertexHandles();
+        disposeFaceHandles();
+        if (state.boxEditProxy && state.boxEditProxy.parent) state.boxEditProxy.parent.remove(state.boxEditProxy);
         state.vertexHandlesGroup = createVertexHandles(wb);
         state.boxEditGroup.add(state.vertexHandlesGroup);
         state.transformControls.setMode('translate');
+      } else if (mode === 'face') {
+        disposeVertexHandles();
+        disposeFaceHandles();
+        if (state.boxEditProxy && state.boxEditProxy.parent) state.boxEditProxy.parent.remove(state.boxEditProxy);
+        state.faceHandlesGroup = createFaceHandles(wb);
+        state.boxEditGroup.add(state.faceHandlesGroup);
+        state.transformControls.setMode('translate');
       } else {
         disposeVertexHandles();
-        const wb2 = getCurrentEditingWorldBox();
+        disposeFaceHandles();
         if (!state.boxEditProxy) state.boxEditProxy = createBoxEditProxy();
         if (!state.boxEditProxy.parent) state.boxEditGroup.add(state.boxEditProxy);
+        const wb2 = getCurrentEditingWorldBox();
         if (wb2) syncProxyFromWorldBox(state.boxEditProxy, wb2);
         state.transformControls.attach(state.boxEditProxy);
         state.transformControls.setMode(mode);
