@@ -925,17 +925,15 @@ function applyVertexPositionToWorldBox(vertexIndex, worldPos, worldBoxUnified) {
   return worldBoxToUnified({ min: box3.min.toArray(), max: box3.max.toArray() });
 }
 
-/** 用 8 个顶点手柄的当前世界坐标重算 AABB，避免依赖当前 box 导致负方向拖拽不生效 */
+/** 用 8 个顶点手柄的当前世界坐标重算 AABB。父级无变换故直接用 .position 作为世界坐标，避免 matrixWorld 滞后导致负方向无效 */
 function getWorldBoxFromVertexHandles(vertexHandlesGroup, draggedVertexIndex, draggedWorldPos) {
   if (!vertexHandlesGroup || vertexHandlesGroup.children.length !== 8) return null;
   const points = [];
-  const temp = new THREE.Vector3();
   for (let i = 0; i < 8; i++) {
     if (i === draggedVertexIndex) {
       points.push(new THREE.Vector3(draggedWorldPos.x, draggedWorldPos.y, draggedWorldPos.z));
     } else {
-      vertexHandlesGroup.children[i].getWorldPosition(temp);
-      points.push(temp.clone());
+      points.push(vertexHandlesGroup.children[i].position.clone());
     }
   }
   const box3 = new THREE.Box3().setFromPoints(points);
@@ -2640,14 +2638,18 @@ async function init() {
     if (state.boxEditMode === 'vertex' && state.editingVertexIndex != null) {
       const attached = state.transformControls.object;
       if (attached?.userData?.isVertexHandle && state.vertexHandlesGroup) {
-        state.scene.updateMatrixWorld(true);
-        const worldPos = new THREE.Vector3();
-        attached.getWorldPosition(worldPos);
-        const next = getWorldBoxFromVertexHandles(state.vertexHandlesGroup, state.editingVertexIndex, worldPos);
-        if (next) {
-          setCurrentEditingWorldBox(next);
-          syncVertexHandlesFromWorldBox(state.vertexHandlesGroup, next, state.editingVertexIndex);
-        }
+        requestAnimationFrame(() => {
+          if (!state.editingBox || state.boxEditMode !== 'vertex' || state.editingVertexIndex == null) return;
+          if (state.transformControls.object !== attached) return;
+          // 下一帧再读 position，确保 TransformControls 已写入；父级无变换故 position 即世界坐标
+          const draggedPos = attached.position.clone();
+          const next = getWorldBoxFromVertexHandles(state.vertexHandlesGroup, state.editingVertexIndex, draggedPos);
+          if (next) {
+            setCurrentEditingWorldBox(next);
+            syncVertexHandlesFromWorldBox(state.vertexHandlesGroup, next, state.editingVertexIndex);
+            updateHighlight();
+          }
+        });
       }
     } else if (state.boxEditProxy && state.transformControls.object === state.boxEditProxy) {
       const next = getWorldBoxFromProxy(state.boxEditProxy);
