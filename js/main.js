@@ -751,24 +751,104 @@ function raycastToDrawingPlane() {
   return null;
 }
 
-// ----- WorldBox 编辑：获取/设置当前正在编辑的 worldBox -----
-function getCurrentEditingWorldBox() {
-  if (!state.editingBox) return null;
-  if (state.editingBox.type === 'drawing') return state.drawingBox;
-  const a = state.annotations[state.editingBox.annotIndex];
-  const t = a?.targets?.[state.editingBox.targetIndex];
-  return t?.worldBox ? { min: [...t.worldBox.min], max: [...t.worldBox.max] } : null;
+// ----- WorldBox 支持两种格式：AABB { min, max } 或 带朝向 { center, halfExtents, quaternion } -----
+function isOrientedWorldBox(wb) {
+  return wb && Array.isArray(wb.center) && Array.isArray(wb.halfExtents) && Array.isArray(wb.quaternion);
 }
 
-function setCurrentEditingWorldBox(worldBox) {
-  if (!state.editingBox || !worldBox) return;
-  const min = [worldBox.min[0], worldBox.min[1], worldBox.min[2]];
-  const max = [worldBox.max[0], worldBox.max[1], worldBox.max[2]];
+function worldBoxToUnified(wb) {
+  if (!wb) return null;
+  if (isOrientedWorldBox(wb)) {
+    return {
+      center: [...wb.center],
+      halfExtents: [...wb.halfExtents],
+      quaternion: [...wb.quaternion],
+    };
+  }
+  const min = wb.min;
+  const max = wb.max;
+  return {
+    center: [(min[0] + max[0]) / 2, (min[1] + max[1]) / 2, (min[2] + max[2]) / 2],
+    halfExtents: [
+      Math.max((max[0] - min[0]) / 2, 0.005),
+      Math.max((max[1] - min[1]) / 2, 0.005),
+      Math.max((max[2] - min[2]) / 2, 0.005),
+    ],
+    quaternion: [0, 0, 0, 1],
+  };
+}
+
+function quaternionIsIdentity(q) {
+  if (!q || q.length < 4) return true;
+  return Math.abs(q[3] - 1) < 1e-6 && Math.abs(q[0]) < 1e-6 && Math.abs(q[1]) < 1e-6 && Math.abs(q[2]) < 1e-6;
+}
+
+function unifiedToStored(u) {
+  if (!u) return null;
+  if (quaternionIsIdentity(u.quaternion)) {
+    const c = u.center;
+    const h = u.halfExtents;
+    return {
+      min: [c[0] - h[0], c[1] - h[1], c[2] - h[2]],
+      max: [c[0] + h[0], c[1] + h[1], c[2] + h[2]],
+    };
+  }
+  return { center: [...u.center], halfExtents: [...u.halfExtents], quaternion: [...u.quaternion] };
+}
+
+function copyStoredWorldBox(wb) {
+  if (!wb) return null;
+  if (wb.min && wb.max) return { min: [...wb.min], max: [...wb.max] };
+  if (wb.center && wb.halfExtents && wb.quaternion) return { center: [...wb.center], halfExtents: [...wb.halfExtents], quaternion: [...wb.quaternion] };
+  return null;
+}
+
+function getWorldBoxCenter(wb) {
+  if (!wb) return null;
+  if (wb.center) return new THREE.Vector3(wb.center[0], wb.center[1], wb.center[2]);
+  const min = wb.min;
+  const max = wb.max;
+  return new THREE.Vector3((min[0] + max[0]) / 2, (min[1] + max[1]) / 2, (min[2] + max[2]) / 2);
+}
+
+function getWorldBoxCorners(wb) {
+  const u = worldBoxToUnified(wb);
+  if (!u) return [];
+  const c = u.center;
+  const h = u.halfExtents;
+  const q = new THREE.Quaternion(u.quaternion[0], u.quaternion[1], u.quaternion[2], u.quaternion[3]);
+  const center = new THREE.Vector3(c[0], c[1], c[2]);
+  const corners = [];
+  const p = new THREE.Vector3();
+  for (const sx of [-1, 1]) for (const sy of [-1, 1]) for (const sz of [-1, 1]) {
+    p.set(sx * h[0], sy * h[1], sz * h[2]);
+    p.applyQuaternion(q);
+    p.add(center);
+    corners.push(p.clone());
+  }
+  return corners;
+}
+
+function getCurrentEditingWorldBox() {
+  if (!state.editingBox) return null;
+  let wb = null;
+  if (state.editingBox.type === 'drawing') wb = state.drawingBox;
+  else {
+    const t = state.annotations[state.editingBox.annotIndex]?.targets?.[state.editingBox.targetIndex];
+    wb = t?.worldBox;
+  }
+  return worldBoxToUnified(wb);
+}
+
+function setCurrentEditingWorldBox(unified) {
+  if (!state.editingBox || !unified) return;
+  const stored = unifiedToStored(unified);
+  if (!stored) return;
   if (state.editingBox.type === 'drawing') {
-    state.drawingBox = { min, max };
+    state.drawingBox = stored;
   } else {
     const t = state.annotations[state.editingBox.annotIndex].targets[state.editingBox.targetIndex];
-    t.worldBox = { min, max };
+    t.worldBox = stored;
   }
 }
 
@@ -784,18 +864,13 @@ function createBoxEditProxy() {
   return group;
 }
 
-function syncProxyFromWorldBox(proxy, worldBox) {
-  const min = worldBox.min;
-  const max = worldBox.max;
-  const cx = (min[0] + max[0]) / 2;
-  const cy = (min[1] + max[1]) / 2;
-  const cz = (min[2] + max[2]) / 2;
-  proxy.position.set(cx, cy, cz);
-  const hx = Math.max((max[0] - min[0]) / 2, 0.005);
-  const hy = Math.max((max[1] - min[1]) / 2, 0.005);
-  const hz = Math.max((max[2] - min[2]) / 2, 0.005);
-  proxy.userData.boxChild.scale.set(hx, hy, hz);
-  proxy.quaternion.identity();
+function syncProxyFromWorldBox(proxy, unified) {
+  if (!unified) return;
+  const c = unified.center;
+  const h = unified.halfExtents;
+  proxy.position.set(c[0], c[1], c[2]);
+  proxy.userData.boxChild.scale.set(h[0], h[1], h[2]);
+  proxy.quaternion.set(unified.quaternion[0], unified.quaternion[1], unified.quaternion[2], unified.quaternion[3]);
   proxy.updateMatrixWorld(true);
 }
 
@@ -805,15 +880,11 @@ function getWorldBoxFromProxy(proxy) {
   const hx = box.scale.x;
   const hy = box.scale.y;
   const hz = box.scale.z;
-  const corners = [];
-  const p = new THREE.Vector3();
-  for (const sx of [-1, 1]) for (const sy of [-1, 1]) for (const sz of [-1, 1]) {
-    p.set(sx * hx, sy * hy, sz * hz);
-    p.applyMatrix4(proxy.matrixWorld);
-    corners.push(p.clone());
-  }
-  const box3 = new THREE.Box3().setFromPoints(corners);
-  return { min: box3.min.toArray(), max: box3.max.toArray() };
+  return {
+    center: proxy.position.toArray(),
+    halfExtents: [hx, hy, hz],
+    quaternion: proxy.quaternion.toArray(),
+  };
 }
 
 // ----- 顶点手柄：8 个小球，userData.vertexIndex 0..7 -----
@@ -822,19 +893,14 @@ const BOX_VERTEX_SIGN = [
   [0, 0, 1], [1, 0, 1], [1, 1, 1], [0, 1, 1],
 ]; // 0=min 1=max 对 x,y,z
 
-function createVertexHandles(worldBox) {
+function createVertexHandles(worldBoxUnified) {
+  const corners = worldBoxUnified ? getWorldBoxCorners(worldBoxUnified) : [];
+  if (corners.length !== 8) return new THREE.Group();
   const group = new THREE.Group();
   const mat = new THREE.MeshBasicMaterial({ color: 0x00ff88 });
-  const min = worldBox.min;
-  const max = worldBox.max;
   for (let i = 0; i < 8; i++) {
-    const s = BOX_VERTEX_SIGN[i];
     const mesh = new THREE.Mesh(new THREE.SphereGeometry(0.15, 12, 12), mat.clone());
-    mesh.position.set(
-      s[0] ? max[0] : min[0],
-      s[1] ? max[1] : min[1],
-      s[2] ? max[2] : min[2]
-    );
+    mesh.position.copy(corners[i]);
     mesh.userData.vertexIndex = i;
     mesh.userData.isVertexHandle = true;
     group.add(mesh);
@@ -842,31 +908,20 @@ function createVertexHandles(worldBox) {
   return group;
 }
 
-function syncVertexHandlesFromWorldBox(group, worldBox) {
-  const min = worldBox.min;
-  const max = worldBox.max;
+function syncVertexHandlesFromWorldBox(group, worldBoxUnified) {
+  const corners = worldBoxUnified ? getWorldBoxCorners(worldBoxUnified) : [];
+  if (corners.length !== 8) return;
   group.children.forEach((mesh, i) => {
-    const s = BOX_VERTEX_SIGN[i];
-    mesh.position.set(
-      s[0] ? max[0] : min[0],
-      s[1] ? max[1] : min[1],
-      s[2] ? max[2] : min[2]
-    );
+    if (corners[i]) mesh.position.copy(corners[i]);
   });
 }
 
-function applyVertexPositionToWorldBox(vertexIndex, worldPos, worldBox) {
-  const min = [worldBox.min[0], worldBox.min[1], worldBox.min[2]];
-  const max = [worldBox.max[0], worldBox.max[1], worldBox.max[2]];
-  const s = BOX_VERTEX_SIGN[vertexIndex];
-  if (s[0]) max[0] = worldPos.x; else min[0] = worldPos.x;
-  if (s[1]) max[1] = worldPos.y; else min[1] = worldPos.y;
-  if (s[2]) max[2] = worldPos.z; else min[2] = worldPos.z;
-  const eps = 0.01;
-  if (max[0] < min[0]) max[0] = min[0] + eps;
-  if (max[1] < min[1]) max[1] = min[1] + eps;
-  if (max[2] < min[2]) max[2] = min[2] + eps;
-  return { min, max };
+function applyVertexPositionToWorldBox(vertexIndex, worldPos, worldBoxUnified) {
+  const corners = getWorldBoxCorners(worldBoxUnified);
+  if (corners.length !== 8) return worldBoxUnified;
+  corners[vertexIndex].set(worldPos.x, worldPos.y, worldPos.z);
+  const box3 = new THREE.Box3().setFromPoints(corners);
+  return worldBoxToUnified({ min: box3.min.toArray(), max: box3.max.toArray() });
 }
 
 function enterBoxEdit(editingBox, mode = 'translate') {
@@ -1188,18 +1243,16 @@ function computeWorldBoxFromSelection() {
 }
 
 function createBoxMeshFromWorldBox(worldBox, color, opacity) {
-  const [min, max] = [worldBox.min, worldBox.max];
-  const cx = (min[0] + max[0]) / 2;
-  const cy = (min[1] + max[1]) / 2;
-  const cz = (min[2] + max[2]) / 2;
-  const sx = Math.max(max[0] - min[0], 0.01);
-  const sy = Math.max(max[1] - min[1], 0.01);
-  const sz = Math.max(max[2] - min[2], 0.01);
+  const u = worldBoxToUnified(worldBox);
+  if (!u) return null;
+  const c = u.center;
+  const h = u.halfExtents;
   const geo = new THREE.BoxGeometry(1, 1, 1);
   const mat = createOverlayMaterial(color, opacity);
   const mesh = new THREE.Mesh(geo, mat);
-  mesh.position.set(cx, cy, cz);
-  mesh.scale.set(sx, sy, sz);
+  mesh.position.set(c[0], c[1], c[2]);
+  mesh.scale.set(2 * h[0], 2 * h[1], 2 * h[2]);
+  mesh.quaternion.set(u.quaternion[0], u.quaternion[1], u.quaternion[2], u.quaternion[3]);
   mesh.userData.isAnnotationBox = true;
   return mesh;
 }
@@ -1359,13 +1412,8 @@ function getAnnotationAnchorPoints(annot) {
   if (!annot.targets) return out;
   annot.targets.forEach((t) => {
     if (t.worldBox) {
-      const min = t.worldBox.min;
-      const max = t.worldBox.max;
-      out.push(new THREE.Vector3(
-        (min[0] + max[0]) / 2,
-        (min[1] + max[1]) / 2,
-        (min[2] + max[2]) / 2
-      ));
+      const center = getWorldBoxCenter(t.worldBox);
+      if (center) out.push(center);
       return;
     }
     const entry = state.meshes.find((m) => m.meshId === t.meshId);
@@ -1485,7 +1533,7 @@ function updateHighlight() {
     const selBox = computeWorldBoxFromSelection();
     if (selBox) {
       const mesh = createBoxMeshFromWorldBox(selBox, highlightColor, state.overlayOpacity);
-      state.annotationBoxGroup.add(mesh);
+      if (mesh) state.annotationBoxGroup.add(mesh);
     }
   }
 
@@ -1493,14 +1541,16 @@ function updateHighlight() {
   if (state.annotationMode === 'worldbox') {
     if (state.drawingBox) {
       const mesh = createBoxMeshFromWorldBox(state.drawingBox, highlightColor, state.overlayOpacity);
-      mesh.userData.isDrawingBox = true;
-      state.annotationBoxGroup.add(mesh);
+      if (mesh) {
+        mesh.userData.isDrawingBox = true;
+        state.annotationBoxGroup.add(mesh);
+      }
     } else if (state.drawingBoxFirstPoint) {
       const p = state.drawingBoxFirstPoint;
       const half = 1;
       const preview = { min: [p[0] - half, p[1] - half, p[2] - half], max: [p[0] + half, p[1] + half, p[2] + half] };
       const mesh = createBoxMeshFromWorldBox(preview, highlightColor, 0.5);
-      state.annotationBoxGroup.add(mesh);
+      if (mesh) state.annotationBoxGroup.add(mesh);
     }
   }
 
@@ -1514,9 +1564,11 @@ function updateHighlight() {
       const isHovered = hovered && hovered.annotIndex === annotIndex && hovered.targetIndex === ti;
       const color = isHovered ? '#ffffff' : baseColor;
       const boxMesh = createBoxMeshFromWorldBox(t.worldBox, color, isHovered ? 0.7 : state.overlayOpacity);
-      boxMesh.userData.annotIndex = annotIndex;
-      boxMesh.userData.targetIndex = ti;
-      state.annotationBoxGroup.add(boxMesh);
+      if (boxMesh) {
+        boxMesh.userData.annotIndex = annotIndex;
+        boxMesh.userData.targetIndex = ti;
+        state.annotationBoxGroup.add(boxMesh);
+      }
     });
   });
 }
@@ -1831,7 +1883,7 @@ function addAnnotation() {
 
   if (state.annotationMode === 'worldbox') {
     if (!state.drawingBox) return;
-    const targets = [{ worldBox: { min: [...state.drawingBox.min], max: [...state.drawingBox.max] }, description }];
+    const targets = [{ worldBox: copyStoredWorldBox(state.drawingBox), description }];
     const annot = {
       id: `annot_${Date.now()}`,
       targets,
@@ -1928,7 +1980,7 @@ function addToAnnotation() {
     if (!state.drawingBox) return;
     const descriptionEl = document.getElementById('annot-description');
     const description = descriptionEl ? String(descriptionEl.value || '').slice(0, 500) : '';
-    const oneTarget = { worldBox: { min: [...state.drawingBox.min], max: [...state.drawingBox.max] }, description };
+    const oneTarget = { worldBox: copyStoredWorldBox(state.drawingBox), description };
     annot.targets = (annot.targets || []).concat(oneTarget);
     state.drawingBox = null;
     state.drawingBoxFirstPoint = null;
