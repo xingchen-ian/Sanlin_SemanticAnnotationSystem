@@ -58,6 +58,10 @@ const state = {
   fillLight: null,              // 补光
   annotationBoxGroup: null,     // 标注与选区的半透明 box 容器（世界坐标），加入 scene
   hoveredAnnotationTarget: null, // { annotIndex, targetIndex } 悬停编辑面板子标注时高亮场景中对应 box/引线
+  // WorldBox 模式（仅用框标注，不选模型/面）
+  annotationMode: 'mesh',       // 'mesh' | 'worldbox'
+  drawingBox: null,             // 正在绘制的 box: { min: [x,y,z], max: [x,y,z] } 或 null
+  drawingBoxFirstPoint: null,   // 绘制时第一个角点（世界坐标），第二次点击/拖拽定对角
 };
 
 const supabase = (() => {
@@ -710,6 +714,62 @@ function getMeshFaceCount(mesh) {
   return pos ? pos.count / 3 : 0;
 }
 
+// ----- 根据当前标注方式与选择模式更新底部提示 -----
+function setHintForMode() {
+  const hintEl = document.getElementById('hint');
+  if (!hintEl) return;
+  if (state.annotationMode === 'worldbox') {
+    hintEl.textContent = 'WorldBox：在场景中点击定起点，再点击定对角绘制框 · 右键旋转';
+    return;
+  }
+  if (state.selectionMode === 'object') {
+    hintEl.textContent = '物体模式：左键选择 · Alt+左键拖拽框选 · 右键旋转';
+  } else {
+    hintEl.textContent = '面模式：左键选择面 · Alt+左键框选 · 勾选「高精度选择」可在最细 LOD 上选面';
+  }
+}
+
+// ----- WorldBox 绘制：射线与过相机目标点、法线为相机朝向的平面求交 -----
+function raycastToDrawingPlane() {
+  if (!state.camera || !state.controls) return null;
+  const planeNormal = new THREE.Vector3();
+  state.camera.getWorldDirection(planeNormal);
+  const plane = new THREE.Plane();
+  plane.setFromNormalAndCoplanarPoint(planeNormal, state.controls.target);
+  const target = new THREE.Vector3();
+  state.raycaster.setFromCamera(state.mouse, state.camera);
+  if (state.raycaster.ray.intersectPlane(plane, target)) return target;
+  return null;
+}
+
+// ----- WorldBox 模式：点击场景定起点或对角，完成绘制 -----
+function handleWorldBoxClick(event) {
+  const canvas = document.getElementById('canvas');
+  if (!canvas || !state.camera) return;
+  const rect = canvas.getBoundingClientRect();
+  state.mouse.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
+  state.mouse.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
+  const point = raycastToDrawingPlane();
+  if (!point) return;
+  const p = [point.x, point.y, point.z];
+  if (!state.drawingBoxFirstPoint) {
+    state.drawingBoxFirstPoint = p;
+    state.drawingBox = null;
+  } else {
+    const a = state.drawingBoxFirstPoint;
+    const min = [Math.min(a[0], p[0]), Math.min(a[1], p[1]), Math.min(a[2], p[2])];
+    const max = [Math.max(a[0], p[0]), Math.max(a[1], p[1]), Math.max(a[2], p[2])];
+    const eps = 0.01;
+    if (max[0] - min[0] < eps) max[0] = min[0] + eps;
+    if (max[1] - min[1] < eps) max[1] = min[1] + eps;
+    if (max[2] - min[2] < eps) max[2] = min[2] + eps;
+    state.drawingBox = { min, max };
+    state.drawingBoxFirstPoint = null;
+  }
+  updateSelectionUI();
+  updateHighlight();
+}
+
 // ----- 射线检测单选（同一射线可能穿过多个 LOD 的 mesh，优先取几何最精细的一个） -----
 function performClickSelect(event) {
   const canvas = document.getElementById('canvas');
@@ -959,6 +1019,7 @@ function onPointerDown(event) {
     return;
   }
   if (event.button !== 0) return;
+  if (state.annotationMode === 'worldbox') return; // WorldBox 模式下不做 mesh 框选
   if (!event.altKey) return; // 仅 Alt + 拖拽 进入框选
   const canvas = document.getElementById('canvas');
   const coords = getCanvasCoords(event, canvas);
@@ -1006,6 +1067,10 @@ function onPointerClick(event) {
   if (state.justDidBoxSelect) {
     state.justDidBoxSelect = false;
     return; // 刚完成框选，避免 click 覆盖选择结果
+  }
+  if (state.annotationMode === 'worldbox') {
+    handleWorldBoxClick(event);
+    return;
   }
   performClickSelect(event);
 }
@@ -1150,11 +1215,27 @@ function updateHighlight() {
     state.annotationBoxGroup.remove(child);
   }
 
-  // 未保存的选区：一个 box 包住当前选中的一组面
-  const selBox = computeWorldBoxFromSelection();
-  if (selBox) {
-    const mesh = createBoxMeshFromWorldBox(selBox, highlightColor, state.overlayOpacity);
-    state.annotationBoxGroup.add(mesh);
+  // 未保存的选区：一个 box 包住当前选中的一组面（仅 mesh 模式）
+  if (state.annotationMode !== 'worldbox') {
+    const selBox = computeWorldBoxFromSelection();
+    if (selBox) {
+      const mesh = createBoxMeshFromWorldBox(selBox, highlightColor, state.overlayOpacity);
+      state.annotationBoxGroup.add(mesh);
+    }
+  }
+
+  // WorldBox 模式：正在绘制的框预览
+  if (state.annotationMode === 'worldbox') {
+    if (state.drawingBox) {
+      const mesh = createBoxMeshFromWorldBox(state.drawingBox, highlightColor, state.overlayOpacity);
+      state.annotationBoxGroup.add(mesh);
+    } else if (state.drawingBoxFirstPoint) {
+      const p = state.drawingBoxFirstPoint;
+      const half = 1;
+      const preview = { min: [p[0] - half, p[1] - half, p[2] - half], max: [p[0] + half, p[1] + half, p[2] + half] };
+      const mesh = createBoxMeshFromWorldBox(preview, highlightColor, 0.5);
+      state.annotationBoxGroup.add(mesh);
+    }
   }
 
   const hovered = state.hoveredAnnotationTarget;
@@ -1193,6 +1274,32 @@ function updateSelectionUI() {
   const form = document.getElementById('annotation-form');
   const addToRow = document.getElementById('add-to-annot-row');
   const selectEl = document.getElementById('annot-target-select');
+  const meshOptions = document.getElementById('mesh-selection-options');
+
+  if (state.annotationMode === 'worldbox') {
+    meshOptions?.classList.add('hidden');
+    form.classList.remove('hidden');
+    if (state.drawingBox) {
+      info.textContent = '已绘制框，填写标签/描述后点击「新建标注」';
+    } else if (state.drawingBoxFirstPoint) {
+      info.textContent = '已定起点，再点击场景定对角完成框';
+    } else {
+      info.textContent = 'WorldBox 模式：在场景中点击定起点，再点击定对角绘制框';
+    }
+    if (state.annotations.length > 0) {
+      addToRow?.classList.remove('hidden');
+      if (selectEl) {
+        selectEl.innerHTML = state.annotations.map((a, i) =>
+          `<option value="${i}">${a.label || '未命名'}</option>`
+        ).join('');
+      }
+    } else {
+      addToRow?.classList.add('hidden');
+    }
+    return;
+  }
+
+  meshOptions?.classList.remove('hidden');
   const summary = getSelectedTargetsSummary();
   if (!summary) {
     info.textContent = '未选择';
@@ -1201,12 +1308,12 @@ function updateSelectionUI() {
     info.textContent = `已选 ${summary}`;
     form.classList.remove('hidden');
     if (state.annotations.length > 0) {
-      addToRow.classList.remove('hidden');
+      addToRow?.classList.remove('hidden');
       selectEl.innerHTML = state.annotations.map((a, i) =>
         `<option value="${i}">${a.label || '未命名'}</option>`
       ).join('');
     } else {
-      addToRow.classList.add('hidden');
+      addToRow?.classList.add('hidden');
     }
   }
 }
@@ -1251,6 +1358,8 @@ function updateAnnotationList() {
             <input type="text" class="annot-edit-category" value="${(a.category || '').replace(/"/g, '&quot;')}" placeholder="分类" />
             <label class="annot-edit-field-label">颜色</label>
             <input type="color" class="annot-edit-color" value="${a.color || '#FF9900'}" />
+            <label class="annot-edit-field-label">描述（500字以内）</label>
+            <textarea class="annot-edit-description" maxlength="500" rows="2" placeholder="描述该区域包含的模型结构">${(a.description || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')}</textarea>
             ${targets.length ? `<label class="annot-edit-field-label">子标注（每个 box 可单独设文案、可删除）</label><div class="annot-sub-list">${subItems}</div>` : ''}
             <div class="annot-edit-actions">
               <button type="button" class="btn-save-edit">保存</button>
@@ -1292,12 +1401,14 @@ function updateAnnotationList() {
         const label = li.querySelector('.annot-edit-label').value.trim() || '未命名';
         const category = li.querySelector('.annot-edit-category').value.trim() || '';
         const color = li.querySelector('.annot-edit-color').value;
+        const descEl = li.querySelector('.annot-edit-description');
+        const description = descEl ? String(descEl.value || '').slice(0, 500) : '';
         const subLabels = [];
         li.querySelectorAll('.annot-edit-sub-label').forEach((input) => {
           const ti = parseInt(input.dataset.targetIndex, 10);
           subLabels[ti] = input.value.trim();
         });
-        saveEditAnnotation(idx, { label, category, color, targetLabels: subLabels });
+        saveEditAnnotation(idx, { label, category, color, description, targetLabels: subLabels });
       });
       cancelBtn?.addEventListener('click', () => {
         state.editingIndex = null;
@@ -1336,7 +1447,7 @@ function updateAnnotationList() {
       if (e.target.closest('.annot-item-actions')) return;
       state.selectedTargets.clear();
       annot.targets.forEach(t => {
-        state.selectedTargets.set(t.meshId, t.faceIndices?.length ? [...t.faceIndices] : null);
+        if (t.meshId != null) state.selectedTargets.set(t.meshId, t.faceIndices?.length ? [...t.faceIndices] : null);
       });
       updateHighlight();
       updateSelectionUI();
@@ -1377,12 +1488,13 @@ function removeAnnotationTarget(annotIndex, targetIndex) {
   updateCalloutOverlay();
 }
 
-async function saveEditAnnotation(idx, { label, category, color, targetLabels }) {
+async function saveEditAnnotation(idx, { label, category, color, description, targetLabels }) {
   const a = state.annotations[idx];
   if (!a) return;
   a.label = label;
   a.category = category;
   a.color = color;
+  if (description !== undefined) a.description = String(description).slice(0, 500);
   if (Array.isArray(targetLabels) && a.targets) {
     a.targets.forEach((t, i) => {
       t.label = targetLabels[i] !== undefined ? (targetLabels[i] || undefined) : t.label;
@@ -1393,12 +1505,14 @@ async function saveEditAnnotation(idx, { label, category, color, targetLabels })
 
   const base = getApiUrl();
   const modelId = state.currentModelId;
+  const patchBody = { label, category, color };
+  if (description !== undefined) patchBody.description = String(description).slice(0, 500);
   if (base && modelId && isServerId(a.id)) {
     try {
       await fetch(`${base}/api/models/${modelId}/annotations/${a.id}`, {
         method: 'PATCH',
         headers: getAuthHeaders(),
-        body: JSON.stringify({ label, category, color }),
+        body: JSON.stringify(patchBody),
       });
     } catch (e) {
       console.error('saveEditAnnotation:', e);
@@ -1432,13 +1546,39 @@ async function deleteAnnotation(idx) {
   updateHighlight();
 }
 
-// ----- 新建标注：当前选中的全部面用一个整体 box 包裹，一条引线 -----
+// ----- 新建标注：当前选中的全部面用一个整体 box 包裹，或 WorldBox 模式下用当前绘制的框 -----
 function addAnnotation() {
   const label = document.getElementById('annot-label').value.trim() || '未命名';
   const category = document.getElementById('annot-category').value.trim() || '';
   const color = document.getElementById('annot-color').value;
-  if (state.selectedTargets.size === 0) return;
+  const descriptionEl = document.getElementById('annot-description');
+  const description = descriptionEl ? String(descriptionEl.value || '').slice(0, 500) : '';
 
+  if (state.annotationMode === 'worldbox') {
+    if (!state.drawingBox) return;
+    const targets = [{ worldBox: { min: [...state.drawingBox.min], max: [...state.drawingBox.max] } }];
+    const annot = {
+      id: `annot_${Date.now()}`,
+      targets,
+      label,
+      category,
+      color,
+      description,
+      createdAt: Date.now(),
+    };
+    state.annotations.push(annot);
+    state.drawingBox = null;
+    state.drawingBoxFirstPoint = null;
+    updateAnnotationList();
+    updateHighlight();
+    updateSelectionUI();
+    document.getElementById('annot-label').value = '';
+    document.getElementById('annot-category').value = '';
+    if (descriptionEl) descriptionEl.value = '';
+    return;
+  }
+
+  if (state.selectedTargets.size === 0) return;
   const worldBox = computeWorldBoxFromSelection();
   const first = state.selectedTargets.entries().next().value;
   const [firstMeshId, firstFaceIndices] = first ? first : [null, null];
@@ -1458,6 +1598,7 @@ function addAnnotation() {
     label,
     category,
     color,
+    description,
     createdAt: Date.now(),
   };
   state.annotations.push(annot);
@@ -1467,6 +1608,7 @@ function addAnnotation() {
 
   document.getElementById('annot-label').value = '';
   document.getElementById('annot-category').value = '';
+  if (descriptionEl) descriptionEl.value = '';
 }
 
 // ----- 将选择添加到已有标注 -----
@@ -1500,14 +1642,26 @@ function mergeTargetsIntoAnnotation(annot, newTargets) {
   });
 }
 
-// 添加到已有标注：当前选中的全部面视为一组，只新增一个 box + 一条引线（与「新建标注」一致，避免多 mesh 时出现多个 box）
+// 添加到已有标注：当前选中的全部面视为一组，或 WorldBox 模式下用当前绘制的框
 function addToAnnotation() {
   const selectEl = document.getElementById('annot-target-select');
-  const idx = parseInt(selectEl.value, 10);
+  const idx = parseInt(selectEl?.value, 10);
   const annot = state.annotations[idx];
   if (!annot) return;
-  if (state.selectedTargets.size === 0) return;
 
+  if (state.annotationMode === 'worldbox') {
+    if (!state.drawingBox) return;
+    const oneTarget = { worldBox: { min: [...state.drawingBox.min], max: [...state.drawingBox.max] } };
+    annot.targets = (annot.targets || []).concat(oneTarget);
+    state.drawingBox = null;
+    state.drawingBoxFirstPoint = null;
+    updateAnnotationList();
+    updateHighlight();
+    updateSelectionUI();
+    return;
+  }
+
+  if (state.selectedTargets.size === 0) return;
   const worldBox = computeWorldBoxFromSelection();
   const first = state.selectedTargets.entries().next().value;
   const [firstMeshId, firstFaceIndices] = first ? first : [null, null];
@@ -1660,6 +1814,7 @@ function apiToAnnot(a) {
     label: a.label || '未命名',
     category: a.category || '',
     color: a.color || '#FF9900',
+    description: a.description != null ? String(a.description).slice(0, 500) : '',
     createdAt: a.created_at ? new Date(a.created_at).getTime() : Date.now(),
   };
 }
@@ -1968,6 +2123,7 @@ async function loadAnnotationsFromApi() {
       label: a.label || '未命名',
       category: a.category || '',
       color: a.color || '#FF9900',
+      description: a.description != null ? String(a.description).slice(0, 500) : '',
       createdAt: a.created_at ? new Date(a.created_at).getTime() : Date.now(),
     }));
     updateAnnotationList();
@@ -2007,6 +2163,7 @@ async function saveAnnotationsToApi() {
       category: a.category,
       color: a.color,
       author,
+      ...(a.description !== undefined && { description: String(a.description).slice(0, 500) }),
     }));
     const r = await fetch(`${base}/api/models/${modelId}/annotations`, {
       method: 'PUT',
@@ -2029,6 +2186,7 @@ async function saveAnnotationsToApi() {
       label: a.label || '未命名',
       category: a.category || '',
       color: a.color || '#FF9900',
+      description: a.description != null ? String(a.description).slice(0, 500) : '',
       createdAt: a.created_at ? new Date(a.created_at).getTime() : Date.now(),
     }));
     state.editingIndex = null;
@@ -2052,6 +2210,7 @@ function exportAnnotations() {
       label: a.label || '未命名',
       category: a.category || '',
       color: a.color || '#FF9900',
+      description: a.description != null ? String(a.description).slice(0, 500) : '',
       createdAt: a.createdAt != null ? a.createdAt : Date.now(),
     })),
   };
@@ -2333,6 +2492,27 @@ async function init() {
     updateHighlight();
   });
 
+  document.getElementById('btn-annot-mode-mesh')?.addEventListener('click', () => {
+    state.annotationMode = 'mesh';
+    state.drawingBox = null;
+    state.drawingBoxFirstPoint = null;
+    document.getElementById('btn-annot-mode-mesh')?.classList.add('active');
+    document.getElementById('btn-annot-mode-worldbox')?.classList.remove('active');
+    updateSelectionUI();
+    updateHighlight();
+    setHintForMode();
+  });
+  document.getElementById('btn-annot-mode-worldbox')?.addEventListener('click', () => {
+    state.annotationMode = 'worldbox';
+    state.selectedTargets.clear();
+    state.drawingBox = null;
+    state.drawingBoxFirstPoint = null;
+    document.getElementById('btn-annot-mode-worldbox')?.classList.add('active');
+    document.getElementById('btn-annot-mode-mesh')?.classList.remove('active');
+    updateSelectionUI();
+    updateHighlight();
+    setHintForMode();
+  });
   document.getElementById('btn-mode-object').addEventListener('click', () => {
     state.selectionMode = 'object';
     state.selectedTargets.clear();
@@ -2340,7 +2520,7 @@ async function init() {
     document.getElementById('btn-mode-face').classList.remove('active');
     updateSelectionUI();
     updateHighlight();
-    document.getElementById('hint').textContent = '物体模式：左键选择 · Alt+左键拖拽框选 · 右键旋转';
+    setHintForMode();
   });
   document.getElementById('btn-mode-face').addEventListener('click', () => {
     state.selectionMode = 'face';
@@ -2349,8 +2529,18 @@ async function init() {
     document.getElementById('btn-mode-object').classList.remove('active');
     updateSelectionUI();
     updateHighlight();
-    document.getElementById('hint').textContent = '面模式：左键选择面 · Alt+左键框选 · 勾选「高精度选择」可在最细 LOD 上选面';
+    setHintForMode();
   });
+  const descEl = document.getElementById('annot-description');
+  const descCountEl = document.getElementById('annot-description-count');
+  if (descEl && descCountEl) {
+    function updateDescCount() {
+      const len = (descEl.value || '').length;
+      descCountEl.textContent = `${len} / 500`;
+    }
+    descEl.addEventListener('input', updateDescCount);
+    updateDescCount();
+  }
 
   const chkHighLod = document.getElementById('chk-selection-high-lod');
   if (chkHighLod) {
@@ -2375,6 +2565,7 @@ async function init() {
 
   updateSelectionUI();
   updateAnnotationList();
+  setHintForMode();
 
   let lastTime = performance.now();
   function animate() {

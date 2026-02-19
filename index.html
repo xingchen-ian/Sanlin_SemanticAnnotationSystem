@@ -84,13 +84,16 @@
       </section>
 
       <section class="panel-section">
-        <h2>选择模式</h2>
+        <h2>标注方式</h2>
         <div class="mode-toggle">
+          <button id="btn-annot-mode-mesh" class="mode-btn active">按模型选择</button>
+          <button id="btn-annot-mode-worldbox" class="mode-btn">按框绘制 (WorldBox)</button>
+        </div>
+        <div id="mesh-selection-options" class="selection-options">
+          <span class="selection-options-label">选择模式</span>
           <button id="btn-mode-object" class="mode-btn active">物体</button>
           <button id="btn-mode-face" class="mode-btn">面</button>
-        </div>
-        <div class="selection-high-lod">
-          <label><input type="checkbox" id="chk-selection-high-lod" /> 高精度选择（面模式时加载最高 LOD）</label>
+          <label class="selection-high-lod"><input type="checkbox" id="chk-selection-high-lod" /> 高精度选择（面模式）</label>
         </div>
       </section>
 
@@ -124,6 +127,8 @@
         <div id="annotation-form" class="hidden">
           <input type="text" id="annot-label" placeholder="标签 (如: 商铺)" />
           <input type="text" id="annot-category" placeholder="分类 (如: Commercial)" />
+          <textarea id="annot-description" placeholder="描述该区域包含的模型结构（500字以内）" rows="3" maxlength="500"></textarea>
+          <span id="annot-description-count" class="description-count">0 / 500</span>
           <input type="color" id="annot-color" value="#FF9900" title="颜色" />
           <button id="btn-add-annotation">新建标注</button>
           <div id="add-to-annot-row" class="hidden">
