@@ -925,6 +925,23 @@ function applyVertexPositionToWorldBox(vertexIndex, worldPos, worldBoxUnified) {
   return worldBoxToUnified({ min: box3.min.toArray(), max: box3.max.toArray() });
 }
 
+/** 用 8 个顶点手柄的当前世界坐标重算 AABB，避免依赖当前 box 导致负方向拖拽不生效 */
+function getWorldBoxFromVertexHandles(vertexHandlesGroup, draggedVertexIndex, draggedWorldPos) {
+  if (!vertexHandlesGroup || vertexHandlesGroup.children.length !== 8) return null;
+  const points = [];
+  const temp = new THREE.Vector3();
+  for (let i = 0; i < 8; i++) {
+    if (i === draggedVertexIndex) {
+      points.push(new THREE.Vector3(draggedWorldPos.x, draggedWorldPos.y, draggedWorldPos.z));
+    } else {
+      vertexHandlesGroup.children[i].getWorldPosition(temp);
+      points.push(temp.clone());
+    }
+  }
+  const box3 = new THREE.Box3().setFromPoints(points);
+  return worldBoxToUnified({ min: box3.min.toArray(), max: box3.max.toArray() });
+}
+
 function enterBoxEdit(editingBox, mode = 'translate') {
   state.editingBox = editingBox;
   state.boxEditMode = mode;
@@ -2622,15 +2639,14 @@ async function init() {
     if (!state.editingBox) return;
     if (state.boxEditMode === 'vertex' && state.editingVertexIndex != null) {
       const attached = state.transformControls.object;
-      if (attached?.userData?.isVertexHandle) {
+      if (attached?.userData?.isVertexHandle && state.vertexHandlesGroup) {
         state.scene.updateMatrixWorld(true);
         const worldPos = new THREE.Vector3();
         attached.getWorldPosition(worldPos);
-        const wb = getCurrentEditingWorldBox();
-        if (wb) {
-          const next = applyVertexPositionToWorldBox(state.editingVertexIndex, worldPos, wb);
+        const next = getWorldBoxFromVertexHandles(state.vertexHandlesGroup, state.editingVertexIndex, worldPos);
+        if (next) {
           setCurrentEditingWorldBox(next);
-          if (state.vertexHandlesGroup) syncVertexHandlesFromWorldBox(state.vertexHandlesGroup, next, state.editingVertexIndex);
+          syncVertexHandlesFromWorldBox(state.vertexHandlesGroup, next, state.editingVertexIndex);
         }
       }
     } else if (state.boxEditProxy && state.transformControls.object === state.boxEditProxy) {
