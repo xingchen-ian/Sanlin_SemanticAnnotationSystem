@@ -876,7 +876,7 @@ function enterBoxEdit(editingBox, mode = 'translate') {
   const wb = getCurrentEditingWorldBox();
   if (!wb) return;
 
-  state.transformControls.setSize(0.8);
+  state.transformControls.setSize(1.2);
 
   if (mode === 'vertex') {
     disposeVertexHandles();
@@ -2556,6 +2556,10 @@ async function init() {
   state.controls = controls;
 
   state.transformControls = new TransformControls(state.camera, state.renderer.domElement);
+  const helper = state.transformControls.getHelper ? state.transformControls.getHelper() : state.transformControls._root;
+  if (helper) {
+    state.boxEditGroup.add(helper);
+  }
   state.transformControls.addEventListener('dragging-changed', (e) => {
     if (state.controls) state.controls.enabled = !e.value;
   });
