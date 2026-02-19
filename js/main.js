@@ -2620,6 +2620,7 @@ async function init() {
     if (state.boxEditMode === 'vertex' && state.editingVertexIndex != null) {
       const attached = state.transformControls.object;
       if (attached?.userData?.isVertexHandle) {
+        state.scene.updateMatrixWorld(true);
         const worldPos = new THREE.Vector3();
         attached.getWorldPosition(worldPos);
         const wb = getCurrentEditingWorldBox();
