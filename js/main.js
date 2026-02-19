@@ -908,10 +908,11 @@ function createVertexHandles(worldBoxUnified) {
   return group;
 }
 
-function syncVertexHandlesFromWorldBox(group, worldBoxUnified) {
+function syncVertexHandlesFromWorldBox(group, worldBoxUnified, skipIndex = null) {
   const corners = worldBoxUnified ? getWorldBoxCorners(worldBoxUnified) : [];
   if (corners.length !== 8) return;
   group.children.forEach((mesh, i) => {
+    if (i === skipIndex) return;
     if (corners[i]) mesh.position.copy(corners[i]);
   });
 }
@@ -1025,6 +1026,8 @@ function handleWorldBoxClick(event) {
     if (hitVertex.length > 0) {
       const idx = hitVertex[0].object.userData.vertexIndex;
       state.editingVertexIndex = idx;
+      state.transformControls.setMode('translate');
+      state.transformControls.setSpace('world');
       state.transformControls.attach(hitVertex[0].object);
       updateHighlight();
       return;
@@ -2627,7 +2630,7 @@ async function init() {
         if (wb) {
           const next = applyVertexPositionToWorldBox(state.editingVertexIndex, worldPos, wb);
           setCurrentEditingWorldBox(next);
-          if (state.vertexHandlesGroup) syncVertexHandlesFromWorldBox(state.vertexHandlesGroup, next);
+          if (state.vertexHandlesGroup) syncVertexHandlesFromWorldBox(state.vertexHandlesGroup, next, state.editingVertexIndex);
         }
       }
     } else if (state.boxEditProxy && state.transformControls.object === state.boxEditProxy) {
