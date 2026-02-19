@@ -2532,6 +2532,29 @@ async function init() {
   state.boxEditGroup = new THREE.Group();
   state.boxEditGroup.name = 'boxEdit';
   state.scene.add(state.boxEditGroup);
+
+  const size = getCanvasSize(canvas);
+  state.camera = new THREE.PerspectiveCamera(60, size.width / size.height, 0.1, 1000);
+  state.camera.position.set(10, 8, 10);
+
+  state.renderer = new THREE.WebGLRenderer({ antialias: true, canvas });
+  state.renderer.setSize(size.width, size.height);
+  state.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+  state.renderer.outputColorSpace = THREE.SRGBColorSpace;
+  state.renderer.toneMapping = THREE.ACESFilmicToneMapping;
+  state.renderer.toneMappingExposure = 1.0;  // 原 1.3 会偏亮，降为 1.0
+
+  const controls = new OrbitControls(state.camera, canvas);
+  controls.target.set(0, 0, 0);
+  controls.enableDamping = true;
+  controls.dampingFactor = 0.05;
+  controls.mouseButtons = {
+    LEFT: null,
+    MIDDLE: THREE.MOUSE.DOLLY,
+    RIGHT: THREE.MOUSE.ROTATE,
+  };
+  state.controls = controls;
+
   state.transformControls = new TransformControls(state.camera, state.renderer.domElement);
   state.transformControls.addEventListener('dragging-changed', (e) => {
     if (state.controls) state.controls.enabled = !e.value;
@@ -2561,28 +2584,6 @@ async function init() {
     updateHighlight();
   });
   state.boxEditGroup.add(state.transformControls);
-
-  const size = getCanvasSize(canvas);
-  state.camera = new THREE.PerspectiveCamera(60, size.width / size.height, 0.1, 1000);
-  state.camera.position.set(10, 8, 10);
-
-  state.renderer = new THREE.WebGLRenderer({ antialias: true, canvas });
-  state.renderer.setSize(size.width, size.height);
-  state.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-  state.renderer.outputColorSpace = THREE.SRGBColorSpace;
-  state.renderer.toneMapping = THREE.ACESFilmicToneMapping;
-  state.renderer.toneMappingExposure = 1.0;  // 原 1.3 会偏亮，降为 1.0
-
-  const controls = new OrbitControls(state.camera, canvas);
-  controls.target.set(0, 0, 0);
-  controls.enableDamping = true;
-  controls.dampingFactor = 0.05;
-  controls.mouseButtons = {
-    LEFT: null,
-    MIDDLE: THREE.MOUSE.DOLLY,
-    RIGHT: THREE.MOUSE.ROTATE,
-  };
-  state.controls = controls;
 
   // 灯光（强度可由侧栏滑条调节）
   state.ambientLight = new THREE.AmbientLight(0xffffff, 0.5);
