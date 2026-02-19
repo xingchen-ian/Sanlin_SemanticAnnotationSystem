@@ -1029,18 +1029,14 @@ function enterBoxEdit(editingBox, mode = 'translate') {
     state.vertexHandlesGroup = createVertexHandles(wb);
     state.boxEditGroup.add(state.vertexHandlesGroup);
     state.transformControls.detach();
-  } else if (mode === 'face') {
-    disposeVertexHandles();
-    disposeFaceHandles();
-    if (state.boxEditProxy && state.boxEditProxy.parent) state.boxEditProxy.parent.remove(state.boxEditProxy);
-    state.faceHandlesGroup = createFaceHandles(wb);
-    state.boxEditGroup.add(state.faceHandlesGroup);
-    state.transformControls.detach();
   } else {
+    // 移动 / 旋转：同时显示 proxy（Gizmo）和 6 个面手柄，整合在一处
     disposeVertexHandles();
     disposeFaceHandles();
     if (!state.boxEditProxy) state.boxEditProxy = createBoxEditProxy();
     if (!state.boxEditProxy.parent) state.boxEditGroup.add(state.boxEditProxy);
+    state.faceHandlesGroup = createFaceHandles(wb);
+    if (!state.faceHandlesGroup.parent) state.boxEditGroup.add(state.faceHandlesGroup);
     syncProxyFromWorldBox(state.boxEditProxy, wb);
     state.transformControls.attach(state.boxEditProxy);
     state.transformControls.setMode(mode);
@@ -1143,8 +1139,8 @@ function handleWorldBoxClick(event) {
     }
   }
 
-  // 1b) 若正在编辑面，先检测是否点到面手柄
-  if (state.editingBox && state.boxEditMode === 'face' && state.faceHandlesGroup) {
+  // 1b) 若正在编辑且有点到面手柄（移动/旋转时面手柄始终存在），则选中该面进行拖拽
+  if (state.editingBox && state.faceHandlesGroup) {
     const hitFace = state.raycaster.intersectObjects(state.faceHandlesGroup.children, true);
     if (hitFace.length > 0) {
       const idx = hitFace[0].object.userData.faceIndex;
@@ -1154,6 +1150,24 @@ function handleWorldBoxClick(event) {
       state.transformControls.attach(hitFace[0].object);
       updateHighlight();
       return;
+    }
+  }
+
+  // 1c) 若当前正在拖面，点击框体则把 Gizmo 挂回整体（移动/旋转）
+  if (state.editingBox && state.editingFaceIndex != null && state.boxEditProxy) {
+    const hitBoxReattach = state.raycaster.intersectObjects(state.annotationBoxGroup.children, true);
+    if (hitBoxReattach.length > 0) {
+      const obj = hitBoxReattach[0].object;
+      const isOurBox = (state.editingBox.type === 'drawing' && obj.userData.isDrawingBox) ||
+        (state.editingBox.type === 'annotation' && obj.userData.annotIndex === state.editingBox.annotIndex && obj.userData.targetIndex === state.editingBox.targetIndex);
+      if (isOurBox) {
+        state.editingFaceIndex = null;
+        state.transformControls.detach();
+        state.transformControls.attach(state.boxEditProxy);
+        state.transformControls.setMode(state.boxEditMode);
+        updateHighlight();
+        return;
+      }
     }
   }
 
@@ -3008,20 +3022,11 @@ async function init() {
         state.vertexHandlesGroup = createVertexHandles(wb);
         state.boxEditGroup.add(state.vertexHandlesGroup);
         state.transformControls.setMode('translate');
-      } else if (mode === 'face') {
-        disposeVertexHandles();
-        disposeFaceHandles();
-        if (state.boxEditProxy && state.boxEditProxy.parent) state.boxEditProxy.parent.remove(state.boxEditProxy);
-        state.faceHandlesGroup = createFaceHandles(wb);
-        state.boxEditGroup.add(state.faceHandlesGroup);
-        state.transformControls.setMode('translate');
       } else {
-        disposeVertexHandles();
-        disposeFaceHandles();
+        // 移动 / 旋转：保留面手柄，只把 Gizmo 挂回 proxy 并切换模式
         if (!state.boxEditProxy) state.boxEditProxy = createBoxEditProxy();
         if (!state.boxEditProxy.parent) state.boxEditGroup.add(state.boxEditProxy);
-        const wb2 = getCurrentEditingWorldBox();
-        if (wb2) syncProxyFromWorldBox(state.boxEditProxy, wb2);
+        if (wb) syncProxyFromWorldBox(state.boxEditProxy, wb);
         state.transformControls.attach(state.boxEditProxy);
         state.transformControls.setMode(mode);
       }
